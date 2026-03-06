@@ -64,6 +64,8 @@ SEMANTIC_SCHOLAR_FIELDS = (
 )
 GOOGLE_SCHOLAR_QUERY_INTERVAL_SECONDS = 1.2
 GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT = 20
+ZERO_RESULT_RETRY_ATTEMPTS = 2
+ZERO_RESULT_RETRY_SLEEP_SECONDS = 2.0
 ARXIV_REQUEST_HEADERS = {
     "User-Agent": "PaperDigest/1.0 (contact: local-user)",
 }
@@ -181,6 +183,7 @@ class DigestStats:
     lookback_hours: int = 24
     llm_max_candidates_base: int = 0
     llm_max_candidates_effective: int = 0
+    zero_candidate_recovery_steps: List[str] = field(default_factory=list)
 
 
 def mask_sensitive_text(text: str, extra_values: List[str] | None = None) -> str:
@@ -691,6 +694,100 @@ def dedupe_list(items: List[str]) -> List[str]:
         seen.add(key)
         result.append(item)
     return result
+
+
+def extract_query_terms(text: str) -> List[str]:
+    raw = clean_text(text).lower()
+    if not raw:
+        return []
+    tokens = re.findall(r"[a-z0-9][a-z0-9\-\+_]{1,}", raw)
+    stopwords = {
+        "and",
+        "or",
+        "not",
+        "all",
+        "title",
+        "abstract",
+        "mesh",
+        "terms",
+        "field",
+        "fields",
+    }
+    result: List[str] = []
+    seen = set()
+    for token in tokens:
+        if token in stopwords or token.isdigit():
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        result.append(token)
+    return result
+
+
+def build_relaxed_queries_for_source(
+    queries: List[str],
+    source: str,
+    project_terms: List[str],
+) -> List[str]:
+    terms: List[str] = []
+    for query in queries:
+        terms.extend(extract_query_terms(query))
+    terms.extend(project_terms[:12])
+    terms = dedupe_list([term for term in terms if term])
+    if not terms:
+        return []
+
+    if source == "arxiv":
+        or_terms = " OR ".join(f"all:{term}" for term in terms[:6])
+        simple_terms = " ".join(terms[:5])
+        return dedupe_list([or_terms, simple_terms])
+    if source == "pubmed":
+        or_terms = " OR ".join(f"\"{term}\"[Title/Abstract]" for term in terms[:6])
+        simple_terms = " OR ".join(f"\"{term}\"" for term in terms[:5])
+        return dedupe_list([or_terms, simple_terms])
+    # Semantic Scholar / Google Scholar plain query
+    return dedupe_list([" ".join(terms[:8]), " ".join(terms[:5])])
+
+
+def generate_rescue_queries_with_llm(config: AppConfig) -> Tuple[List[str], List[str], List[str], List[str]]:
+    if not (config.enable_llm_agent and has_llm_provider(config) and config.research_projects):
+        return [], [], [], []
+
+    projects_payload = [
+        {"name": project.name, "context": project.context}
+        for project in config.research_projects
+    ]
+    project_json = json.dumps(projects_payload, ensure_ascii=False)
+    prompt = (
+        "You are recovering from zero search results in a medical AI paper alert pipeline.\n"
+        "Generate broader but still relevant fallback queries.\n"
+        "Return ONLY JSON with keys: arxiv_queries, pubmed_queries, semantic_scholar_queries, google_scholar_queries.\n"
+        "Each key must be a list of 1..2 strings.\n"
+        "Rules:\n"
+        "- arxiv_queries: use all: syntax, broad OR style, avoid over-constrained boolean nesting\n"
+        "- pubmed_queries: use simple boolean with quoted terms, avoid over-constrained MeSH-only query\n"
+        "- semantic_scholar_queries and google_scholar_queries: concise plain text\n"
+        "- no markdown, no comments\n"
+        f"Projects JSON:\n{project_json}"
+    )
+
+    llm_response = call_llm_json(config, prompt, temperature=0.25)
+    if not isinstance(llm_response, dict):
+        return [], [], [], []
+
+    def normalize(values: Any) -> List[str]:
+        if not isinstance(values, list):
+            return []
+        items = [clean_text(str(item)) for item in values if clean_text(str(item))]
+        return dedupe_list(items)[:2]
+
+    return (
+        normalize(llm_response.get("arxiv_queries", [])),
+        normalize(llm_response.get("pubmed_queries", [])),
+        normalize(llm_response.get("semantic_scholar_queries", [])),
+        normalize(llm_response.get("google_scholar_queries", [])),
+    )
 
 
 def load_topic_configuration(
@@ -1657,6 +1754,20 @@ def rank_relevant_papers_keyword(
 
 
 def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[Paper], Dict[str, Any]]:
+    if not papers:
+        return (
+            [],
+            {
+                "mode": "no_candidates",
+                "threshold": config.llm_relevance_threshold
+                if (config.enable_llm_agent and has_llm_provider(config))
+                else config.min_relevance_score,
+                "scoring_candidates": 0,
+                "scored_count": 0,
+                "pass_count": 0,
+                "score_buckets": {},
+            },
+        )
     if config.enable_llm_agent and has_llm_provider(config):
         try:
             candidates = prefilter_candidates_for_llm(papers, config)
@@ -1734,6 +1845,10 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
     lines.append(f"임계값 통과: {stats.pass_count}건")
     if stats.llm_fallback_reason:
         lines.append(f"LLM 폴백 정보: {stats.llm_fallback_reason}")
+    if stats.zero_candidate_recovery_steps:
+        lines.append("0건 복구 절차:")
+        for step in stats.zero_candidate_recovery_steps:
+            lines.append(f" - {step}")
     if stats.duplicates_filtered > 0:
         lines.append(f"중복 발송 제외: {stats.duplicates_filtered}건")
     if stats.estimated_llm_calls_upper_bound > 0:
@@ -2004,17 +2119,117 @@ def collect_and_rank_papers(
             len(google_scholar_papers_local),
         )
 
+    def apply_source_counts(
+        arxiv_count_value: int,
+        pubmed_count_value: int,
+        semantic_count_value: int,
+        google_scholar_count_value: int,
+        total_count: int,
+    ) -> None:
+        stats.arxiv_candidates = arxiv_count_value
+        stats.pubmed_candidates = pubmed_count_value
+        stats.semantic_scholar_candidates = semantic_count_value
+        stats.google_scholar_candidates = google_scholar_count_value
+        stats.total_candidates = total_count
+
     all_papers, arxiv_count, pubmed_count, semantic_count, google_scholar_count = fetch_from_sources(
         arxiv_queries,
         pubmed_queries,
         semantic_queries,
         google_scholar_queries,
     )
-    stats.arxiv_candidates = arxiv_count
-    stats.pubmed_candidates = pubmed_count
-    stats.semantic_scholar_candidates = semantic_count
-    stats.google_scholar_candidates = google_scholar_count
-    stats.total_candidates = len(all_papers)
+    apply_source_counts(arxiv_count, pubmed_count, semantic_count, google_scholar_count, len(all_papers))
+
+    recovery_steps: List[str] = []
+    if not all_papers:
+        stats.query_strategy = "saved-topics-zero-hit"
+        recovery_steps.append("초기 검색 결과 0건. 자동 복구 절차를 시작합니다.")
+
+        for attempt in range(1, ZERO_RESULT_RETRY_ATTEMPTS + 1):
+            sleep_seconds = ZERO_RESULT_RETRY_SLEEP_SECONDS * attempt
+            recovery_steps.append(f"동일 쿼리 재시도 {attempt}/{ZERO_RESULT_RETRY_ATTEMPTS} (대기 {sleep_seconds:.0f}초)")
+            time.sleep(sleep_seconds)
+            retry_papers, ra, rp, rs, rg = fetch_from_sources(
+                arxiv_queries,
+                pubmed_queries,
+                semantic_queries,
+                google_scholar_queries,
+            )
+            if retry_papers:
+                all_papers = retry_papers
+                apply_source_counts(ra, rp, rs, rg, len(all_papers))
+                stats.query_strategy = f"saved-topics-retry-{attempt}"
+                recovery_steps.append(f"재시도 성공: 총 {len(all_papers)}건")
+                break
+            recovery_steps.append("재시도 결과: 0건")
+
+    if not all_papers:
+        project_terms: List[str] = []
+        for project in config.research_projects:
+            project_terms.extend(extract_query_terms(f"{project.name} {project.context}"))
+        project_terms = dedupe_list(project_terms)
+        relaxed_arxiv = (
+            build_relaxed_queries_for_source(arxiv_queries, "arxiv", project_terms)
+            if arxiv_queries
+            else []
+        )
+        relaxed_pubmed = (
+            build_relaxed_queries_for_source(pubmed_queries, "pubmed", project_terms)
+            if pubmed_queries
+            else []
+        )
+        relaxed_semantic = (
+            build_relaxed_queries_for_source(semantic_queries, "semantic", project_terms)
+            if (config.enable_semantic_scholar and semantic_queries)
+            else []
+        )
+        relaxed_google_scholar = (
+            build_relaxed_queries_for_source(google_scholar_queries, "google", project_terms)
+            if (config.enable_google_scholar and google_scholar_queries)
+            else []
+        )
+        if relaxed_arxiv or relaxed_pubmed or relaxed_semantic or relaxed_google_scholar:
+            recovery_steps.append("쿼리 완화 재검색을 수행합니다.")
+            retry_papers, ra, rp, rs, rg = fetch_from_sources(
+                relaxed_arxiv,
+                relaxed_pubmed,
+                relaxed_semantic,
+                relaxed_google_scholar,
+            )
+            if retry_papers:
+                all_papers = retry_papers
+                apply_source_counts(ra, rp, rs, rg, len(all_papers))
+                stats.query_strategy = "relaxed-query-retry"
+                recovery_steps.append(f"완화 쿼리 성공: 총 {len(all_papers)}건")
+            else:
+                recovery_steps.append("완화 쿼리 결과: 0건")
+
+    if not all_papers:
+        try:
+            rescue_arxiv, rescue_pubmed, rescue_semantic, rescue_google = generate_rescue_queries_with_llm(config)
+            if rescue_arxiv or rescue_pubmed or rescue_semantic or rescue_google:
+                recovery_steps.append("LLM 구조 요청 재검색을 수행합니다.")
+                retry_papers, ra, rp, rs, rg = fetch_from_sources(
+                    rescue_arxiv,
+                    rescue_pubmed,
+                    rescue_semantic,
+                    rescue_google,
+                )
+                if retry_papers:
+                    all_papers = retry_papers
+                    apply_source_counts(ra, rp, rs, rg, len(all_papers))
+                    stats.query_strategy = "llm-rescue-query"
+                    recovery_steps.append(f"LLM 구조 요청 성공: 총 {len(all_papers)}건")
+                else:
+                    recovery_steps.append("LLM 구조 요청 결과: 0건")
+            else:
+                recovery_steps.append("LLM 구조 요청 쿼리를 생성하지 못했습니다.")
+        except Exception as exc:
+            recovery_steps.append(f"LLM 구조 요청 실패: {mask_sensitive_text(str(exc))}")
+
+    if not all_papers and recovery_steps:
+        stats.query_strategy = "recovery-failed"
+    stats.zero_candidate_recovery_steps = recovery_steps
 
     emit_progress(progress_callback, "Ranking relevant papers...", 75)
     all_papers = [paper for paper in all_papers if paper.published_at_utc <= now_utc]
