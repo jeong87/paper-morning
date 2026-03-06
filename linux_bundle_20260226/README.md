@@ -118,13 +118,17 @@ chmod +x build_linux.sh
 - 메일 미수신: 발신/수신 주소, 스팸함, 인증 방식 확인
 
 ## 인증 방식 우선순위
-1. **Google OAuth (권장)**
-2. **Gmail 앱 비밀번호 (레거시/호환용)**
+1. **Gmail 앱 비밀번호 (현재 기본 권장)**
+2. **Google OAuth (보류/실험)**
 
-### Gmail 앱 비밀번호(레거시) 안내
+### Gmail 앱 비밀번호 안내
 - 일반 계정 비밀번호가 아닙니다.
 - 2단계 인증 활성화 후 16자리 앱 비밀번호를 사용해야 합니다.
 - 발급 링크: https://myaccount.google.com/apppasswords
+
+### Google OAuth 안내 (보류)
+- 현재 공개 배포 기본 경로에서는 OAuth를 기본값으로 쓰지 않습니다.
+- 안정화/운영정책 확정 전까지는 Gmail 앱 비밀번호 방식을 사용하세요.
 
 ## 문의
 - `nineclas@gmail.com`
