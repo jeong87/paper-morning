@@ -31,6 +31,7 @@ Fallback:
 If you do not want to keep your local PC on 24/7, use GitHub Actions.
 
 - Workflow file: `.github/workflows/paper-morning-digest.yml`
+- First-time topic bootstrap workflow: `.github/workflows/paper-morning-bootstrap-topics.yml`
 - Daily schedule: `00:00 UTC` (= `09:00 KST`)
 - Manual trigger supports runner selection:
   - `ubuntu-latest`
@@ -43,11 +44,17 @@ If you do not want to keep your local PC on 24/7, use GitHub Actions.
 Required GitHub Secrets:
 - `PM_ENV_FILE`: multiline `.env` content
 - `PM_TOPICS_JSON`: full `user_topics.json` content
+- Optional: `PM_PROJECTS_JSON` (projects-only JSON for bootstrap workflow)
 
 Runtime behavior in Actions:
 1. `scripts/gha_prepare_runtime.py` restores runtime files under `ci_runtime/`.
 2. App runs once via `python paper_digest_app.py --run-once` (or `--dry-run`).
 3. Logs are uploaded as workflow artifacts.
+
+Bootstrap behavior:
+1. Run `paper-morning-bootstrap-topics` workflow.
+2. It generates `generated_user_topics.json` from projects using LLM.
+3. Copy generated JSON into secret `PM_TOPICS_JSON`.
 
 See `MANUAL_KR.md` for full Korean setup instructions.
 

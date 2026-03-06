@@ -1,0 +1,61 @@
+name: paper-morning-bootstrap-topics
+
+on:
+  workflow_dispatch:
+    inputs:
+      os_runner:
+        description: "Runner OS"
+        required: true
+        default: "ubuntu-latest"
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+      projects_lines:
+        description: "Optional: one project per line (name | context). If empty, use secret PM_PROJECTS_JSON or PM_TOPICS_JSON.projects."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-morning-bootstrap-topics
+  cancel-in-progress: false
+
+jobs:
+  generate_topics:
+    runs-on: ${{ inputs.os_runner }}
+    env:
+      PYTHONUTF8: "1"
+      PM_BOOTSTRAP_OUTPUT_DIR: ${{ github.workspace }}/bootstrap_output
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Generate topics from projects (LLM)
+        env:
+          PM_ENV_FILE: ${{ secrets.PM_ENV_FILE }}
+          PM_TOPICS_JSON: ${{ secrets.PM_TOPICS_JSON }}
+          PM_PROJECTS_JSON: ${{ secrets.PM_PROJECTS_JSON }}
+          PM_PROJECTS_LINES: ${{ inputs.projects_lines }}
+        run: python scripts/gha_generate_topics_from_projects.py
+
+      - name: Upload generated topics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-morning-bootstrap-topics-${{ github.run_number }}
+          path: bootstrap_output/
+          if-no-files-found: warn
+          retention-days: 7

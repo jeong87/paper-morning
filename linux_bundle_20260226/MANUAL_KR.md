@@ -34,13 +34,16 @@
 1. GitHub에 이 프로젝트를 올리거나(또는 fork) 기본 브랜치(`main`)를 준비합니다.
 2. Actions 탭이 활성화되어 있는지 확인합니다.
 
-### 3-2) Repository Secret 2개 등록
+### 3-2) Repository Secret 등록
 경로:
 - `GitHub 저장소 > Settings > Secrets and variables > Actions > New repository secret`
 
 필수 Secret:
 1. `PM_ENV_FILE`
 2. `PM_TOPICS_JSON`
+
+선택 Secret (초기 생성 편의):
+3. `PM_PROJECTS_JSON` (projects만 담은 JSON)
 
 #### A) PM_ENV_FILE 예시
 아래를 기반으로 본인 값으로 바꿔서 그대로 저장하세요.
@@ -127,7 +130,42 @@ SEMANTIC_SCHOLAR_API_KEY=
 - `topics`가 비어 있으면 실행 시 "검색 쿼리 없음"으로 실패합니다.
 - 쿼리는 "프로젝트 변경 시에만" 갱신하고, 일일 실행에서는 저장된 쿼리를 그대로 사용합니다.
 
-## 4) 자동 실행 (매일 9시)
+#### C) PM_PROJECTS_JSON 예시 (선택)
+초기 쿼리 생성 워크플로우에서 `PM_TOPICS_JSON` 대신 프로젝트 목록만 넣고 싶을 때 사용합니다.
+
+```json
+{
+  "projects": [
+    {
+      "name": "안저영상 기반 뇌졸중 예측",
+      "context": "Fundus image based stroke risk prediction using multimodal deep learning"
+    },
+    {
+      "name": "CCTV 손씻기 탐지",
+      "context": "Hospital infection prevention by hand hygiene detection from CCTV"
+    }
+  ]
+}
+```
+
+## 4) 초기 쿼리 자동생성 (초보자 추천)
+워크플로우:
+- `.github/workflows/paper-morning-bootstrap-topics.yml`
+
+실행 방법:
+1. `Actions` 탭에서 `paper-morning-bootstrap-topics` 선택
+2. `Run workflow` 클릭
+3. `Runner OS` 선택
+4. `projects_lines`를 비워두면 Secret 우선순위로 프로젝트를 읽습니다.
+   - 1순위: `PM_PROJECTS_JSON`
+   - 2순위: `PM_TOPICS_JSON.projects`
+5. 또는 `projects_lines`에 아래처럼 한 줄씩 입력해도 됩니다.
+   - `프로젝트명 | 프로젝트 설명`
+6. 실행 완료 후 Artifact(`paper-morning-bootstrap-topics-*`)에서 `generated_user_topics.json` 다운로드
+7. 해당 파일 내용을 `PM_TOPICS_JSON` Secret 값으로 교체
+8. `paper-morning-digest`를 `dry_run`으로 1회 실행하여 확인
+
+## 5) 자동 실행 (매일 9시)
 스케줄은 워크플로우에 이미 설정되어 있습니다.
 - `cron: "0 0 * * *"` = 매일 00:00 UTC = 한국시간 09:00
 
@@ -136,7 +174,7 @@ SEMANTIC_SCHOLAR_API_KEY=
 - `PM_ENV_FILE`, `PM_TOPICS_JSON` 두 Secret이 정상 등록
 - Gmail/LLM 키가 유효
 
-## 5) 수동 실행 (OS/모드 선택)
+## 6) 수동 실행 (OS/모드 선택)
 1. `Actions` 탭으로 이동
 2. `paper-morning-digest` 워크플로우 선택
 3. `Run workflow` 클릭
@@ -150,13 +188,13 @@ SEMANTIC_SCHOLAR_API_KEY=
 2. `send_now` + `ubuntu-latest`
 3. 필요 시 `windows-latest`, `macos-latest` 호환 테스트
 
-## 6) 결과 확인
+## 7) 결과 확인
 - 실행 로그: Actions 각 Step 콘솔
 - Artifact: `paper-morning-logs-*`
   - `ci_runtime/data/`가 업로드됩니다.
   - 실패 원인 분석 시 Artifact 로그를 우선 확인하세요.
 
-## 7) 설정 변경 방법
+## 8) 설정 변경 방법
 일반적으로 파일 커밋 없이 Secret만 바꿔서 운영합니다.
 
 1. 주제/쿼리 변경
@@ -168,13 +206,13 @@ SEMANTIC_SCHOLAR_API_KEY=
 3. 실행 즉시 반영 테스트
 - Actions에서 `Run workflow` 수동 실행
 
-## 8) 보안 운영 권장
+## 9) 보안 운영 권장
 - Secret은 절대 코드/README/이슈에 평문으로 올리지 마세요.
 - 개인 테스트 외 저장소는 private 권장
 - 최소 권한으로 repo collaborator 관리
 - 정기적으로 앱 비밀번호/API 키 회전
 
-## 9) 자주 발생하는 오류
+## 10) 자주 발생하는 오류
 
 1. `535 Username and Password not accepted`
 - Gmail 주소와 앱 비밀번호 계정이 서로 다른 경우
@@ -193,10 +231,10 @@ SEMANTIC_SCHOLAR_API_KEY=
 - `RECENT_HOURS`가 너무 짧거나 쿼리가 과도하게 좁음
 - 해결: 시간창 확대(예: 120), 쿼리 완화, threshold 점검
 
-## 10) Linux/Windows/macOS 관련 안내
+## 11) Linux/Windows/macOS 관련 안내
 - 실행 환경은 GitHub 러너이므로 로컬 OS 준비가 필요 없습니다.
 - 수동 실행에서 러너 OS를 바꿔 동일 워크플로우를 검증할 수 있습니다.
 - 실제 "매일 자동 발송"은 기본적으로 스케줄 잡힌 Ubuntu job이 담당합니다.
 
-## 11) 문의
+## 12) 문의
 - 기능/오류 문의: `nineclas@gmail.com`
