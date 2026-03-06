@@ -205,7 +205,7 @@ def call_gemini_for_topic_generation(
     project_json = json.dumps(projects, ensure_ascii=False)
     prompt = (
         "You are helping configure a medical AI paper alert assistant.\n"
-        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query.\n"
+        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.\n"
         "Return ONLY JSON object with schema:\n"
         "{\n"
         '  "topics": [\n'
@@ -214,7 +214,8 @@ def call_gemini_for_topic_generation(
         '      "keywords": ["..."],\n'
         '      "arxiv_query": "...",\n'
         '      "pubmed_query": "...",\n'
-        '      "semantic_scholar_query": "..."\n'
+        '      "semantic_scholar_query": "...",\n'
+        '      "google_scholar_query": "..."\n'
         "    }\n"
         "  ]\n"
         "}\n"
@@ -224,6 +225,7 @@ def call_gemini_for_topic_generation(
         "- arXiv query must use all: terms\n"
         "- PubMed query should use boolean and quoted phrases where useful\n"
         "- Semantic Scholar query should be concise plain-text research query\n"
+        "- Google Scholar query should be concise plain-text research query\n"
         "- prioritize precision over recall\n"
         "- keep response machine-parseable JSON only\n\n"
         f"Projects JSON:\n{project_json}"
@@ -263,7 +265,7 @@ def call_cerebras_for_topic_generation(
     project_json = json.dumps(projects, ensure_ascii=False)
     prompt = (
         "You are helping configure a medical AI paper alert assistant.\n"
-        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query.\n"
+        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.\n"
         "Return ONLY JSON object with schema:\n"
         "{\n"
         '  "topics": [\n'
@@ -272,7 +274,8 @@ def call_cerebras_for_topic_generation(
         '      "keywords": ["..."],\n'
         '      "arxiv_query": "...",\n'
         '      "pubmed_query": "...",\n'
-        '      "semantic_scholar_query": "..."\n'
+        '      "semantic_scholar_query": "...",\n'
+        '      "google_scholar_query": "..."\n'
         "    }\n"
         "  ]\n"
         "}\n"
@@ -282,6 +285,7 @@ def call_cerebras_for_topic_generation(
         "- arXiv query must use all: terms\n"
         "- PubMed query should use boolean and quoted phrases where useful\n"
         "- Semantic Scholar query should be concise plain-text research query\n"
+        "- Google Scholar query should be concise plain-text research query\n"
         "- prioritize precision over recall\n"
         "- keep response machine-parseable JSON only\n\n"
         f"Projects JSON:\n{project_json}"
@@ -380,6 +384,7 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         arxiv_query = str(item.get("arxiv_query", "")).strip()
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
+        google_scholar_query = str(item.get("google_scholar_query", "")).strip()
         if not name:
             continue
         result.append(
@@ -389,6 +394,7 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "arxiv_query": arxiv_query,
                 "pubmed_query": pubmed_query,
                 "semantic_scholar_query": semantic_query,
+                "google_scholar_query": google_scholar_query,
             }
         )
     return result

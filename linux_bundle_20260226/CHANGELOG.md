@@ -2,6 +2,40 @@
 
 All notable changes to **paper-morning** are documented in this file.
 
+## [0.4.0] - 2026-03-06
+
+### Added
+- Added configurable send cadence:
+  - `SEND_FREQUENCY=daily|every_3_days|weekly`
+  - `SEND_ANCHOR_DATE=YYYY-MM-DD`
+- Added Google Scholar source integration (SerpAPI-based):
+  - `ENABLE_GOOGLE_SCHOLAR`
+  - `GOOGLE_SCHOLAR_API_KEY`
+  - `GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY`
+  - `google_scholar_query` field in topic rows
+- Added beginner-friendly bootstrap support updates:
+  - topic-generation prompts now include `google_scholar_query`
+  - bootstrap output schema updated accordingly
+
+### Changed
+- Scheduler now supports cadence policy at send time:
+  - daily trigger can skip non-due days for 3-day/weekly mode
+  - manual `Send Now` in Web Console bypasses cadence (`force_send`) for immediate testing
+- `LOOKBACK_HOURS` is automatically raised to at least cadence window (e.g., weekly >= 168h).
+- `LLM_MAX_CANDIDATES` upper cap raised to `80`.
+- For 3-day/weekly cadence, effective LLM candidate cap is expanded with a non-linear scaling rule (sublinear) to control token growth.
+- PubMed 429 handling was already improved in prior patch and remains active.
+
+### Docs/UI
+- README overhauled to Korean-first style with logo and simpler onboarding flow.
+- README now places Gmail app-password guidance at the end (legacy/compat path).
+- Settings/Setup UI now expose:
+  - send cadence fields
+  - Google Scholar toggle/key/per-query result limit
+  - updated LLM candidate cap guidance (max 80)
+- Topic Editor table now includes `Google Scholar Query` column.
+- App version bumped to `paper-morning v0.4.0`.
+
 ## [0.3.3] - 2026-03-05
 
 ### Added

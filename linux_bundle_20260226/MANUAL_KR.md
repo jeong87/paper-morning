@@ -58,7 +58,9 @@ GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 TIMEZONE=Asia/Seoul
 SEND_HOUR=9
 SEND_MINUTE=0
-RECENT_HOURS=24
+SEND_FREQUENCY=daily
+SEND_ANCHOR_DATE=2026-01-01
+LOOKBACK_HOURS=24
 
 # Search / Selection
 MAX_PAPERS=5
@@ -67,6 +69,8 @@ ARXIV_MAX_RESULTS_PER_QUERY=25
 PUBMED_MAX_IDS_PER_QUERY=25
 ENABLE_SEMANTIC_SCHOLAR=true
 SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY=20
+ENABLE_GOOGLE_SCHOLAR=false
+GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY=10
 
 # LLM
 ENABLE_LLM_AGENT=true
@@ -85,6 +89,7 @@ CEREBRAS_MODEL=gpt-oss-120b
 # Optional keys
 NCBI_API_KEY=
 SEMANTIC_SCHOLAR_API_KEY=
+GOOGLE_SCHOLAR_API_KEY=
 ```
 
 주의:
@@ -120,7 +125,8 @@ SEMANTIC_SCHOLAR_API_KEY=
       "keywords": ["fundus", "retina", "stroke", "deep learning"],
       "arxiv_query": "(all:fundus OR all:retina) AND (all:stroke) AND (all:deep learning)",
       "pubmed_query": "(fundus OR retina) AND stroke AND (deep learning)",
-      "semantic_scholar_query": "fundus retina stroke deep learning risk prediction"
+      "semantic_scholar_query": "fundus retina stroke deep learning risk prediction",
+      "google_scholar_query": "fundus retina stroke deep learning risk prediction"
     }
   ]
 }
@@ -165,7 +171,7 @@ SEMANTIC_SCHOLAR_API_KEY=
 7. 해당 파일 내용을 `PM_TOPICS_JSON` Secret 값으로 교체
 8. `paper-morning-digest`를 `dry_run`으로 1회 실행하여 확인
 
-## 5) 자동 실행 (매일 9시)
+## 5) 자동 실행
 스케줄은 워크플로우에 이미 설정되어 있습니다.
 - `cron: "0 0 * * *"` = 매일 00:00 UTC = 한국시간 09:00
 
@@ -173,6 +179,7 @@ SEMANTIC_SCHOLAR_API_KEY=
 - 기본 브랜치에 워크플로우 파일이 존재
 - `PM_ENV_FILE`, `PM_TOPICS_JSON` 두 Secret이 정상 등록
 - Gmail/LLM 키가 유효
+- 실제 메일 발송은 `SEND_FREQUENCY`(`daily`/`every_3_days`/`weekly`) 정책을 따릅니다.
 
 ## 6) 수동 실행 (OS/모드 선택)
 1. `Actions` 탭으로 이동
@@ -228,12 +235,15 @@ SEMANTIC_SCHOLAR_API_KEY=
 - 해결: `GEMINI_MODEL` 값을 지원 모델명으로 수정
 
 4. "관련 논문 없음"이 반복
-- `RECENT_HOURS`가 너무 짧거나 쿼리가 과도하게 좁음
+- `LOOKBACK_HOURS`가 너무 짧거나 쿼리가 과도하게 좁음
 - 해결: 시간창 확대(예: 120), 쿼리 완화, threshold 점검
 
 5. `PubMed 429 Too Many Requests`
 - 앱이 자동 재시도/백오프를 수행하며, 일부 쿼리는 스킵 후 나머지 소스로 계속 진행합니다.
 - 안정화를 위해 `NCBI_API_KEY` 설정을 권장합니다.
+
+6. Google Scholar 수집이 0건
+- `ENABLE_GOOGLE_SCHOLAR=true`인데 `GOOGLE_SCHOLAR_API_KEY`(SerpAPI)가 비어 있으면 수집되지 않습니다.
 
 ## 11) Linux/Windows/macOS 관련 안내
 - 실행 환경은 GitHub 러너이므로 로컬 OS 준비가 필요 없습니다.

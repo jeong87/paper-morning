@@ -48,7 +48,7 @@ def read_app_version() -> str:
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
-    return "0.3.3"
+    return "0.4.0"
 
 
 APP_VERSION = read_app_version()
@@ -80,6 +80,8 @@ EXPECTED_ENV_KEYS = [
     "TIMEZONE",
     "SEND_HOUR",
     "SEND_MINUTE",
+    "SEND_FREQUENCY",
+    "SEND_ANCHOR_DATE",
     "LOOKBACK_HOURS",
     "MAX_PAPERS",
     "MIN_RELEVANCE_SCORE",
@@ -88,6 +90,9 @@ EXPECTED_ENV_KEYS = [
     "ENABLE_SEMANTIC_SCHOLAR",
     "SEMANTIC_SCHOLAR_API_KEY",
     "SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY",
+    "ENABLE_GOOGLE_SCHOLAR",
+    "GOOGLE_SCHOLAR_API_KEY",
+    "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY",
     "MAX_SEARCH_QUERIES_PER_SOURCE",
     "NCBI_API_KEY",
     "USER_TOPICS_FILE",
@@ -125,6 +130,8 @@ DEFAULT_ENV_VALUES = {
     "TIMEZONE": "Asia/Seoul",
     "SEND_HOUR": "9",
     "SEND_MINUTE": "0",
+    "SEND_FREQUENCY": "daily",
+    "SEND_ANCHOR_DATE": "2026-01-01",
     "LOOKBACK_HOURS": "24",
     "MAX_PAPERS": "5",
     "MIN_RELEVANCE_SCORE": "6.0",
@@ -133,6 +140,9 @@ DEFAULT_ENV_VALUES = {
     "ENABLE_SEMANTIC_SCHOLAR": "true",
     "SEMANTIC_SCHOLAR_API_KEY": "",
     "SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY": "20",
+    "ENABLE_GOOGLE_SCHOLAR": "false",
+    "GOOGLE_SCHOLAR_API_KEY": "",
+    "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY": "10",
     "MAX_SEARCH_QUERIES_PER_SOURCE": "4",
     "NCBI_API_KEY": "",
     "USER_TOPICS_FILE": "user_topics.json",
@@ -168,6 +178,7 @@ SECRET_ENV_KEYS = {
     "GEMINI_API_KEY",
     "CEREBRAS_API_KEY",
     "SEMANTIC_SCHOLAR_API_KEY",
+    "GOOGLE_SCHOLAR_API_KEY",
     "WEB_PASSWORD",
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "GOOGLE_OAUTH_REFRESH_TOKEN",
@@ -1088,8 +1099,8 @@ def refresh_scheduler() -> str:
         if not scheduler.running:
             scheduler.start()
         return (
-            f"Scheduler active: every day {config.send_hour:02d}:{config.send_minute:02d} "
-            f"({config.timezone_name})"
+            f"Scheduler active: trigger {config.send_hour:02d}:{config.send_minute:02d} "
+            f"({config.timezone_name}), SEND_FREQUENCY={config.send_frequency}"
         )
 
 
@@ -1227,6 +1238,26 @@ def test_semantic_scholar_key(semantic_api_key: str) -> Tuple[bool, str]:
         return False, f"Semantic Scholar 호출 실패: {safe_exception_text(exc)}"
 
 
+def test_google_scholar_key(google_scholar_api_key: str) -> Tuple[bool, str]:
+    if not google_scholar_api_key:
+        return False, "GOOGLE_SCHOLAR_API_KEY가 비어 있습니다."
+    try:
+        response = requests.get(
+            "https://serpapi.com/search.json",
+            params={
+                "engine": "google_scholar",
+                "q": "retina stroke prediction",
+                "num": 1,
+                "api_key": google_scholar_api_key,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return True, "Google Scholar(SerpAPI) 호출 성공"
+    except Exception as exc:
+        return False, f"Google Scholar(SerpAPI) 호출 실패: {safe_exception_text(exc)}"
+
+
 def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
     warnings: List[str] = []
     if env_truthy(str(env_map.get("ALLOW_INSECURE_REMOTE_WEB", "false"))):
@@ -1273,9 +1304,9 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
 
     try:
         llm_candidates = int(str(env_map.get("LLM_MAX_CANDIDATES", "30")).strip())
-        if llm_candidates > 50:
-            warnings.append("LLM_MAX_CANDIDATES는 최대 50까지 권장됩니다. 실행 시 50으로 제한 적용됩니다.")
-        elif llm_candidates > 35:
+        if llm_candidates > 80:
+            warnings.append("LLM_MAX_CANDIDATES는 최대 80까지 권장됩니다. 실행 시 80으로 제한 적용됩니다.")
+        elif llm_candidates > 55:
             warnings.append(f"LLM_MAX_CANDIDATES={llm_candidates}: LLM 비용이 증가할 수 있습니다.")
     except ValueError:
         pass
@@ -1284,6 +1315,13 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
 
     if not str(env_map.get("NCBI_API_KEY", "")).strip():
         warnings.append("NCBI_API_KEY 미설정: PubMed 쿼리 처리량 제한에 걸릴 수 있습니다.")
+
+    if env_truthy(str(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false"))):
+        if not resolve_secret_value(
+            "GOOGLE_SCHOLAR_API_KEY",
+            str(env_map.get("GOOGLE_SCHOLAR_API_KEY", "")),
+        ):
+            warnings.append("ENABLE_GOOGLE_SCHOLAR=true 이지만 GOOGLE_SCHOLAR_API_KEY가 비어 있습니다.")
 
     return warnings
 
@@ -1427,7 +1465,8 @@ def normalize_topics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         arxiv_query = str(item.get("arxiv_query", "")).strip()
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
-        if not (name or keywords or arxiv_query or pubmed_query or semantic_query):
+        google_scholar_query = str(item.get("google_scholar_query", "")).strip()
+        if not (name or keywords or arxiv_query or pubmed_query or semantic_query or google_scholar_query):
             continue
         clean_topics.append(
             {
@@ -1436,6 +1475,7 @@ def normalize_topics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "arxiv_query": arxiv_query,
                 "pubmed_query": pubmed_query,
                 "semantic_scholar_query": semantic_query,
+                "google_scholar_query": google_scholar_query,
             }
         )
 
@@ -1453,7 +1493,11 @@ def read_topics_payload(path: Path) -> Dict[str, Any]:
     return {"projects": [], "topics": []}
 
 
-def has_configured_topic_queries(payload: Dict[str, Any], enable_semantic_scholar: bool = True) -> bool:
+def has_configured_topic_queries(
+    payload: Dict[str, Any],
+    enable_semantic_scholar: bool = True,
+    enable_google_scholar: bool = False,
+) -> bool:
     topics = payload.get("topics", []) if isinstance(payload, dict) else []
     if not isinstance(topics, list):
         return False
@@ -1463,9 +1507,12 @@ def has_configured_topic_queries(payload: Dict[str, Any], enable_semantic_schola
         arxiv_query = str(item.get("arxiv_query", "")).strip()
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
+        google_scholar_query = str(item.get("google_scholar_query", "")).strip()
         if arxiv_query or pubmed_query:
             return True
         if enable_semantic_scholar and semantic_query:
+            return True
+        if enable_google_scholar and google_scholar_query:
             return True
     return False
 
@@ -1501,13 +1548,15 @@ def start_background_job(kind: str) -> Tuple[bool, str]:
         topics_path = get_topics_path(env_map)
         topics_payload = read_topics_payload(topics_path)
         semantic_enabled = env_truthy(env_map.get("ENABLE_SEMANTIC_SCHOLAR", "true"))
+        google_scholar_enabled = env_truthy(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false"))
         if not has_configured_topic_queries(
             topics_payload,
             enable_semantic_scholar=semantic_enabled,
+            enable_google_scholar=google_scholar_enabled,
         ):
             return (
                 False,
-                "검색 쿼리가 없습니다. Topic Editor에서 'Keyword / Query 생성' 또는 arXiv/PubMed/Semantic Scholar 쿼리를 수동 입력 후 Save Topics를 먼저 실행하세요.",
+                "검색 쿼리가 없습니다. Topic Editor에서 'Keyword / Query 생성' 또는 arXiv/PubMed/Semantic Scholar/Google Scholar 쿼리를 수동 입력 후 Save Topics를 먼저 실행하세요.",
             )
 
     if kind == "send_now":
@@ -1558,6 +1607,7 @@ def run_background_job(kind: str) -> None:
             output = run_digest(
                 config,
                 dry_run=False,
+                force_send=True,
                 print_dry_run_output=False,
                 progress_callback=progress_cb,
             )
@@ -1591,7 +1641,7 @@ def call_gemini_for_topic_generation(
     project_json = json.dumps(projects, ensure_ascii=False)
     prompt = (
         "You are helping configure a medical AI paper alert assistant.\n"
-        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query.\n"
+        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.\n"
         "Return ONLY JSON object with schema:\n"
         "{\n"
         '  "topics": [\n'
@@ -1600,7 +1650,8 @@ def call_gemini_for_topic_generation(
         '      "keywords": ["..."],\n'
         '      "arxiv_query": "...",\n'
         '      "pubmed_query": "...",\n'
-        '      "semantic_scholar_query": "..."\n'
+        '      "semantic_scholar_query": "...",\n'
+        '      "google_scholar_query": "..."\n'
         "    }\n"
         "  ]\n"
         "}\n"
@@ -1610,6 +1661,7 @@ def call_gemini_for_topic_generation(
         "- arXiv query must use all: terms\n"
         "- PubMed query should use boolean and quoted phrases where useful\n"
         "- Semantic Scholar query should be concise plain-text research query\n"
+        "- Google Scholar query should be concise plain-text research query\n"
         "- prioritize precision over recall\n"
         "- keep response machine-parseable JSON only\n\n"
         f"Projects JSON:\n{project_json}"
@@ -1655,7 +1707,7 @@ def call_cerebras_for_topic_generation(
     project_json = json.dumps(projects, ensure_ascii=False)
     prompt = (
         "You are helping configure a medical AI paper alert assistant.\n"
-        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query.\n"
+        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.\n"
         "Return ONLY JSON object with schema:\n"
         "{\n"
         '  "topics": [\n'
@@ -1664,7 +1716,8 @@ def call_cerebras_for_topic_generation(
         '      "keywords": ["..."],\n'
         '      "arxiv_query": "...",\n'
         '      "pubmed_query": "...",\n'
-        '      "semantic_scholar_query": "..."\n'
+        '      "semantic_scholar_query": "...",\n'
+        '      "google_scholar_query": "..."\n'
         "    }\n"
         "  ]\n"
         "}\n"
@@ -1674,6 +1727,7 @@ def call_cerebras_for_topic_generation(
         "- arXiv query must use all: terms\n"
         "- PubMed query should use boolean and quoted phrases where useful\n"
         "- Semantic Scholar query should be concise plain-text research query\n"
+        "- Google Scholar query should be concise plain-text research query\n"
         "- prioritize precision over recall\n"
         "- keep response machine-parseable JSON only\n\n"
         f"Projects JSON:\n{project_json}"
@@ -1776,6 +1830,7 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         arxiv_query = str(item.get("arxiv_query", "")).strip()
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
+        google_scholar_query = str(item.get("google_scholar_query", "")).strip()
         if not name:
             continue
         result.append(
@@ -1785,6 +1840,7 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "arxiv_query": arxiv_query,
                 "pubmed_query": pubmed_query,
                 "semantic_scholar_query": semantic_query,
+                "google_scholar_query": google_scholar_query,
             }
         )
     return result
@@ -1832,6 +1888,12 @@ def build_home_body() -> str:
             '<button type="button" class="btn-danger" disabled>연결 해제</button>'
         )
         oauth_disabled_note = "현재 배포판에서는 OAuth UI가 비활성화되어 있습니다. Gmail 앱 비밀번호 방식을 사용하세요."
+    send_frequency = str(env_map.get("SEND_FREQUENCY", "daily") or "daily").strip().lower()
+    send_frequency_label = {
+        "daily": "매일",
+        "every_3_days": "3일마다",
+        "weekly": "매주(7일)",
+    }.get(send_frequency, send_frequency)
 
     body = """
     <div class="page-header">
@@ -1841,7 +1903,10 @@ def build_home_body() -> str:
 
     <div class="card" style="display:flex; align-items:center; gap:10px; padding:14px 18px;">
       <span id="sched-icon" style="font-size:18px;">📅</span>
-      <span id="sched-text" style="font-size:13.5px; font-weight:500;">__SCHEDULER_STATUS__</span>
+      <div>
+        <span id="sched-text" style="font-size:13.5px; font-weight:500;">__SCHEDULER_STATUS__</span>
+        <div class="small" style="margin-top:4px;">발송 주기: <b>__SEND_FREQUENCY__</b></div>
+      </div>
     </div>
 
     <div class="card">
@@ -2024,6 +2089,7 @@ def build_home_body() -> str:
 
     return (
         body.replace("__SCHEDULER_STATUS__", escaped_status)
+        .replace("__SEND_FREQUENCY__", html.escape(send_frequency_label))
         .replace("__LAST_DRY_OUTPUT__", escaped_output)
         .replace("__OAUTH_BADGE__", oauth_badge_html)
         .replace("__OAUTH_EMAIL__", html.escape(oauth_connected_email or "미연결"))
@@ -2218,11 +2284,14 @@ def setup():
             "TIMEZONE",
             "SEND_HOUR",
             "SEND_MINUTE",
+            "SEND_FREQUENCY",
+            "SEND_ANCHOR_DATE",
             "WEB_PASSWORD",
             "ENABLE_LLM_AGENT",
             "ENABLE_GEMINI_ADVANCED_REASONING",
             "ENABLE_CEREBRAS_FALLBACK",
             "ENABLE_SEMANTIC_SCHOLAR",
+            "ENABLE_GOOGLE_SCHOLAR",
             "ALLOW_INSECURE_REMOTE_WEB",
             "USE_KEYRING",
             "ENABLE_GOOGLE_OAUTH",
@@ -2233,6 +2302,7 @@ def setup():
             "SENT_HISTORY_DAYS",
             "NCBI_API_KEY",
             "SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY",
+            "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY",
             "GEMINI_MODEL",
             "CEREBRAS_MODEL",
             "CEREBRAS_API_BASE",
@@ -2245,6 +2315,7 @@ def setup():
                 "ENABLE_GEMINI_ADVANCED_REASONING",
                 "ENABLE_CEREBRAS_FALLBACK",
                 "ENABLE_SEMANTIC_SCHOLAR",
+                "ENABLE_GOOGLE_SCHOLAR",
                 "ALLOW_INSECURE_REMOTE_WEB",
                 "USE_KEYRING",
                 "ENABLE_GOOGLE_OAUTH",
@@ -2259,6 +2330,7 @@ def setup():
             "GEMINI_API_KEY",
             "CEREBRAS_API_KEY",
             "SEMANTIC_SCHOLAR_API_KEY",
+            "GOOGLE_SCHOLAR_API_KEY",
             "WEB_PASSWORD",
             "GOOGLE_OAUTH_CLIENT_SECRET",
             "GOOGLE_OAUTH_REFRESH_TOKEN",
@@ -2289,6 +2361,7 @@ def setup():
     )
     checked_cerebras = "checked" if env_truthy(env_map.get("ENABLE_CEREBRAS_FALLBACK", "true")) else ""
     checked_semantic = "checked" if env_truthy(env_map.get("ENABLE_SEMANTIC_SCHOLAR", "true")) else ""
+    checked_google_scholar = "checked" if env_truthy(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false")) else ""
     checked_remote = "checked" if env_truthy(env_map.get("ALLOW_INSECURE_REMOTE_WEB", "false")) else ""
     checked_keyring = "checked" if env_truthy(env_map.get("USE_KEYRING", "true")) else ""
     checked_google_oauth = "checked" if env_truthy(env_map.get("ENABLE_GOOGLE_OAUTH", "false")) else ""
@@ -2347,6 +2420,18 @@ def setup():
               <input type="hidden" name="SEND_HOUR" id="setup_send_hour" value="{esc('SEND_HOUR')}" />
               <input type="hidden" name="SEND_MINUTE" id="setup_send_minute" value="{esc('SEND_MINUTE')}" />
             </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>발송 주기</strong><small>SEND_FREQUENCY</small></div>
+            <select name="SEND_FREQUENCY" style="width:160px;">
+              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>매일</option>
+              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>3일마다</option>
+              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>매주(7일)</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>주기 기준일</strong><small>SEND_ANCHOR_DATE (YYYY-MM-DD)</small></div>
+            <input type="text" name="SEND_ANCHOR_DATE" value="{esc('SEND_ANCHOR_DATE')}" placeholder="2026-01-01" style="width:160px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label"><strong>Send Now 쿨다운(초)</strong><small>권장 300</small></div>
@@ -2408,6 +2493,18 @@ def setup():
           <div class="settings-row">
             <div class="settings-label"><strong>Semantic Scholar 쿼리당 최대 결과</strong></div>
             <input type="number" min="1" max="100" name="SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY" value="{esc('SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:140px;" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Google Scholar 소스 사용</strong><small>SerpAPI 기반</small></div>
+            <input type="checkbox" name="ENABLE_GOOGLE_SCHOLAR" {checked_google_scholar} />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Google Scholar API Key</strong><small><a href="https://serpapi.com/" target="_blank">🔗 SerpAPI</a></small></div>
+            <input type="password" name="GOOGLE_SCHOLAR_API_KEY" value="" autocomplete="new-password" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Google Scholar 쿼리당 최대 결과</strong><small>권장 10~20</small></div>
+            <input type="number" min="1" max="20" name="GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY" value="{esc('GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:140px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label"><strong>NCBI API Key</strong><small>PubMed 처리량 향상(권장)</small></div>
@@ -2522,6 +2619,12 @@ def setup_healthcheck():
             str(env_map.get("SEMANTIC_SCHOLAR_API_KEY", "")).strip(),
         )
     )
+    google_scholar_ok, google_scholar_msg = test_google_scholar_key(
+        resolve_secret_value(
+            "GOOGLE_SCHOLAR_API_KEY",
+            str(env_map.get("GOOGLE_SCHOLAR_API_KEY", "")).strip(),
+        )
+    )
     google_oauth_ok, google_oauth_msg = test_google_oauth_gmail(env_map)
     return jsonify(
         {
@@ -2530,6 +2633,7 @@ def setup_healthcheck():
             "gemini": {"ok": gemini_ok, "message": gemini_msg},
             "cerebras": {"ok": cerebras_ok, "message": cerebras_msg},
             "semantic_scholar": {"ok": semantic_ok, "message": semantic_msg},
+            "google_scholar": {"ok": google_scholar_ok, "message": google_scholar_msg},
         }
     )
 
@@ -2570,6 +2674,7 @@ def settings():
                 "ENABLE_GEMINI_ADVANCED_REASONING",
                 "ENABLE_CEREBRAS_FALLBACK",
                 "ENABLE_SEMANTIC_SCHOLAR",
+                "ENABLE_GOOGLE_SCHOLAR",
                 "ALLOW_INSECURE_REMOTE_WEB",
                 "USE_KEYRING",
                 "ENABLE_GOOGLE_OAUTH",
@@ -2607,6 +2712,7 @@ def settings():
     )
     cerebras_checked = "checked" if env_truthy(env_map.get("ENABLE_CEREBRAS_FALLBACK", "false")) else ""
     semantic_checked = "checked" if env_truthy(env_map.get("ENABLE_SEMANTIC_SCHOLAR", "true")) else ""
+    google_scholar_checked = "checked" if env_truthy(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false")) else ""
     remote_checked = "checked" if env_truthy(env_map.get("ALLOW_INSECURE_REMOTE_WEB", "false")) else ""
     keyring_checked = "checked" if env_truthy(env_map.get("USE_KEYRING", "true")) else ""
     google_oauth_checked = "checked" if env_truthy(env_map.get("ENABLE_GOOGLE_OAUTH", "false")) else ""
@@ -2772,6 +2878,24 @@ def settings():
               <input type="hidden" name="SEND_MINUTE" id="send_minute_hidden" value="{esc('SEND_MINUTE')}" />
             </div>
           </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>발송 주기</strong>
+              <small>SEND_FREQUENCY — daily / every_3_days / weekly</small>
+            </div>
+            <select name="SEND_FREQUENCY" style="width:180px;">
+              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>매일</option>
+              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>3일마다</option>
+              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>매주(7일)</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>주기 기준일</strong>
+              <small>SEND_ANCHOR_DATE — YYYY-MM-DD</small>
+            </div>
+            <input type="text" name="SEND_ANCHOR_DATE" value="{esc('SEND_ANCHOR_DATE')}" placeholder="2026-01-01" style="width:160px;" />
+          </div>
         </div>
       </div>
 
@@ -2822,10 +2946,24 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
+              <strong>Google Scholar 소스 사용</strong>
+              <small>ENABLE_GOOGLE_SCHOLAR (SerpAPI 기반)</small>
+            </div>
+            <input type="checkbox" name="ENABLE_GOOGLE_SCHOLAR" {google_scholar_checked} />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
               <strong>Semantic Scholar 쿼리당 최대 결과</strong>
               <small>SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY</small>
             </div>
             <input type="number" name="SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY" min="1" max="100" value="{esc('SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:120px;" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Google Scholar 쿼리당 최대 결과</strong>
+              <small>GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY (권장 10~20)</small>
+            </div>
+            <input type="number" name="GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY" min="1" max="20" value="{esc('GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
@@ -2920,6 +3058,13 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
+              <strong>Google Scholar API Key</strong>
+              <small><a href="https://serpapi.com/" target="_blank">🔗 SerpAPI 발급</a>. 빈칸 저장 시 기존값 유지</small>
+            </div>
+            <input type="password" name="GOOGLE_SCHOLAR_API_KEY" value="" placeholder="SerpAPI 키" autocomplete="new-password" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
               <strong>Gemini 최대 논문 수</strong>
               <small>GEMINI_MAX_PAPERS</small>
             </div>
@@ -2942,9 +3087,9 @@ def settings():
           <div class="settings-row">
             <div class="settings-label">
               <strong>LLM 최대 후보 수</strong>
-              <small>LLM_MAX_CANDIDATES — 기본 30, 최대 50</small>
+              <small>LLM_MAX_CANDIDATES — 기본 30, 최대 80 (3일/주간 주기에서는 비선형 확장 적용)</small>
             </div>
-            <input type="number" name="LLM_MAX_CANDIDATES" min="1" max="50" value="{esc('LLM_MAX_CANDIDATES')}" style="width:120px;" />
+            <input type="number" name="LLM_MAX_CANDIDATES" min="1" max="80" value="{esc('LLM_MAX_CANDIDATES')}" style="width:120px;" />
           </div>
         </div>
       </div>
@@ -3031,11 +3176,12 @@ def topics():
       <table>
         <thead>
           <tr>
-            <th style="width:14%;">Topic Name</th>
-            <th style="width:18%;">Keywords (comma separated)</th>
-            <th style="width:22%;">arXiv Query</th>
-            <th style="width:22%;">PubMed Query</th>
-            <th style="width:22%;">Semantic Scholar Query</th>
+            <th style="width:12%;">Topic Name</th>
+            <th style="width:16%;">Keywords (comma separated)</th>
+            <th style="width:18%;">arXiv Query</th>
+            <th style="width:18%;">PubMed Query</th>
+            <th style="width:18%;">Semantic Scholar Query</th>
+            <th style="width:18%;">Google Scholar Query</th>
             <th style="width:80px;">Action</th>
           </tr>
         </thead>
@@ -3113,6 +3259,7 @@ def topics():
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].arxiv_query=this.value">${escHtml(row.arxiv_query || '')}</textarea></td>
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].pubmed_query=this.value">${escHtml(row.pubmed_query || '')}</textarea></td>
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].semantic_scholar_query=this.value">${escHtml(row.semantic_scholar_query || '')}</textarea></td>
+              <td><textarea style="min-height:70px;" oninput="topics[${idx}].google_scholar_query=this.value">${escHtml(row.google_scholar_query || '')}</textarea></td>
               <td><button type="button" class="btn-danger" onclick="removeTopicRow(${idx})">Delete</button></td>
             </tr>
           `);
@@ -3120,7 +3267,7 @@ def topics():
       }
 
       function addTopicRow() {
-        topics.push({ name: '', keywords: '', arxiv_query: '', pubmed_query: '', semantic_scholar_query: '' });
+        topics.push({ name: '', keywords: '', arxiv_query: '', pubmed_query: '', semantic_scholar_query: '', google_scholar_query: '' });
         renderTopics();
       }
 
@@ -3149,9 +3296,10 @@ def topics():
               arxiv_query: (t.arxiv_query || '').trim(),
               pubmed_query: (t.pubmed_query || '').trim(),
               semantic_scholar_query: (t.semantic_scholar_query || '').trim(),
+              google_scholar_query: (t.google_scholar_query || '').trim(),
             };
           })
-          .filter(t => t.name || t.keywords.length || t.arxiv_query || t.pubmed_query || t.semantic_scholar_query);
+          .filter(t => t.name || t.keywords.length || t.arxiv_query || t.pubmed_query || t.semantic_scholar_query || t.google_scholar_query);
       }
 
       async function generateTopics() {

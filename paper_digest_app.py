@@ -36,6 +36,7 @@ PUBMED_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
 PUBMED_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 PUBMED_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 SEMANTIC_SCHOLAR_API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+GOOGLE_SCHOLAR_SERPAPI_URL = "https://serpapi.com/search.json"
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -61,6 +62,8 @@ SEMANTIC_SCHOLAR_MAX_RESULTS_HARD_LIMIT = 100
 SEMANTIC_SCHOLAR_FIELDS = (
     "paperId,title,abstract,url,authors,publicationDate,year,externalIds"
 )
+GOOGLE_SCHOLAR_QUERY_INTERVAL_SECONDS = 1.2
+GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT = 20
 ARXIV_REQUEST_HEADERS = {
     "User-Agent": "PaperDigest/1.0 (contact: local-user)",
 }
@@ -128,6 +131,10 @@ class AppConfig:
     enable_semantic_scholar: bool
     semantic_scholar_api_key: str
     semantic_scholar_max_results_per_query: int
+    google_scholar_queries: List[str]
+    enable_google_scholar: bool
+    google_scholar_api_key: str
+    google_scholar_max_results_per_query: int
     enable_llm_agent: bool
     gemini_api_key: str
     gemini_model: str
@@ -138,9 +145,13 @@ class AppConfig:
     gemini_max_papers: int
     llm_relevance_threshold: float
     llm_batch_size: int
+    llm_max_candidates_base: int
     llm_max_candidates: int
     max_search_queries_per_source: int
     sent_history_days: int
+    send_frequency: str
+    send_interval_days: int
+    send_anchor_date: str
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -152,6 +163,7 @@ class DigestStats:
     arxiv_candidates: int = 0
     pubmed_candidates: int = 0
     semantic_scholar_candidates: int = 0
+    google_scholar_candidates: int = 0
     total_candidates: int = 0
     post_time_filter_candidates: int = 0
     ranking_mode: str = "keyword"
@@ -165,6 +177,10 @@ class DigestStats:
     duplicates_filtered: int = 0
     final_selected: int = 0
     query_strategy: str = "saved-topics"
+    send_frequency: str = "daily"
+    lookback_hours: int = 24
+    llm_max_candidates_base: int = 0
+    llm_max_candidates_effective: int = 0
 
 
 def mask_sensitive_text(text: str, extra_values: List[str] | None = None) -> str:
@@ -351,6 +367,35 @@ def parse_semantic_datetime(publication_date: str, year: object) -> datetime | N
     if year_int < 1900 or year_int > 3000:
         return None
     return datetime(year_int, 1, 1, tzinfo=timezone.utc)
+
+
+def parse_google_scholar_datetime(raw_text: str, now_utc: datetime) -> datetime | None:
+    text = clean_text(raw_text)
+    if not text:
+        return None
+    lowered = text.lower()
+    relative_match = re.search(r"(\d+)\s+(day|days|week|weeks|month|months|year|years)\s+ago", lowered)
+    if relative_match:
+        value = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        if "day" in unit:
+            return now_utc - timedelta(days=value)
+        if "week" in unit:
+            return now_utc - timedelta(days=value * 7)
+        if "month" in unit:
+            return now_utc - timedelta(days=value * 30)
+        if "year" in unit:
+            return now_utc - timedelta(days=value * 365)
+
+    years = re.findall(r"(19\d{2}|20\d{2})", text)
+    if years:
+        try:
+            year_value = int(years[-1])
+            return datetime(year_value, 1, 1, tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
 
 def get_runtime_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -650,11 +695,11 @@ def dedupe_list(items: List[str]) -> List[str]:
 
 def load_topic_configuration(
     topics_file: str,
-) -> Tuple[List[TopicProfile], List[ResearchProject], List[str], List[str], List[str]]:
+) -> Tuple[List[TopicProfile], List[ResearchProject], List[str], List[str], List[str], List[str]]:
     path = Path(topics_file)
     if not path.exists():
         logging.warning("Topic config not found at %s. Starting with empty projects/topics/queries.", path)
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     topics = payload.get("topics", [])
@@ -669,6 +714,7 @@ def load_topic_configuration(
     arxiv_queries: List[str] = []
     pubmed_queries: List[str] = []
     semantic_queries: List[str] = []
+    google_scholar_queries: List[str] = []
 
     for topic in topics:
         if not isinstance(topic, dict):
@@ -676,12 +722,15 @@ def load_topic_configuration(
         arxiv_query = clean_text(str(topic.get("arxiv_query", "")))
         pubmed_query = clean_text(str(topic.get("pubmed_query", "")))
         semantic_query = clean_text(str(topic.get("semantic_scholar_query", "")))
+        google_scholar_query = clean_text(str(topic.get("google_scholar_query", "")))
         if arxiv_query:
             arxiv_queries.append(arxiv_query)
         if pubmed_query:
             pubmed_queries.append(pubmed_query)
         if semantic_query:
             semantic_queries.append(semantic_query)
+        if google_scholar_query:
+            google_scholar_queries.append(google_scholar_query)
 
         name = clean_text(str(topic.get("name", "")))
         keyword_weights = coerce_keyword_weights(topic.get("keywords"))
@@ -711,7 +760,14 @@ def load_topic_configuration(
                 )
             )
 
-    if not profiles and not projects and not arxiv_queries and not pubmed_queries and not semantic_queries:
+    if (
+        not profiles
+        and not projects
+        and not arxiv_queries
+        and not pubmed_queries
+        and not semantic_queries
+        and not google_scholar_queries
+    ):
         logging.warning(
             (
                 "Topic config is empty at %s. Configure projects, then generate/save queries in Topic Editor "
@@ -726,6 +782,7 @@ def load_topic_configuration(
         dedupe_list(arxiv_queries),
         dedupe_list(pubmed_queries),
         dedupe_list(semantic_queries),
+        dedupe_list(google_scholar_queries),
     )
 
 
@@ -1363,6 +1420,106 @@ def fetch_semantic_scholar_papers(
             )
     return list(papers_by_id.values())
 
+
+def fetch_google_scholar_papers(
+    config: AppConfig,
+    since_utc: datetime,
+    now_utc: datetime,
+    queries: List[str],
+) -> List[Paper]:
+    if not config.google_scholar_api_key:
+        logging.warning("Skipping Google Scholar search: GOOGLE_SCHOLAR_API_KEY is not set.")
+        return []
+
+    papers_by_id: Dict[str, Paper] = {}
+    max_results = max(
+        1,
+        min(config.google_scholar_max_results_per_query, GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT),
+    )
+
+    for idx, query in enumerate(queries):
+        if idx > 0:
+            time.sleep(GOOGLE_SCHOLAR_QUERY_INTERVAL_SECONDS)
+        params = {
+            "engine": "google_scholar",
+            "q": query,
+            "num": max_results,
+            "api_key": config.google_scholar_api_key,
+            "hl": "en",
+        }
+        try:
+            response = requests.get(
+                GOOGLE_SCHOLAR_SERPAPI_URL,
+                params=params,
+                timeout=HTTP_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logging.warning(
+                "Skipping Google Scholar query due to failure: %s | query=%s",
+                mask_sensitive_text(str(exc)),
+                query,
+            )
+            continue
+
+        rows = payload.get("organic_results", [])
+        if not isinstance(rows, list):
+            continue
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            title = clean_text(str(row.get("title", "")))
+            if not title:
+                continue
+            url = clean_text(str(row.get("link", "")))
+            snippet = clean_text(str(row.get("snippet", "")))
+            pub_info = row.get("publication_info", {})
+            if not isinstance(pub_info, dict):
+                pub_info = {}
+            summary_text = clean_text(str(pub_info.get("summary", "")))
+
+            authors: List[str] = []
+            author_rows = pub_info.get("authors", [])
+            if isinstance(author_rows, list):
+                for author in author_rows:
+                    if isinstance(author, dict):
+                        author_name = clean_text(str(author.get("name", "")))
+                    else:
+                        author_name = clean_text(str(author))
+                    if author_name:
+                        authors.append(author_name)
+
+            published_at = (
+                parse_google_scholar_datetime(summary_text, now_utc)
+                or parse_google_scholar_datetime(snippet, now_utc)
+                or now_utc
+            )
+            if published_at < since_utc:
+                continue
+
+            paper_id = ""
+            result_id = clean_text(str(row.get("result_id", "")))
+            if result_id:
+                paper_id = f"gscholar:{result_id}"
+            elif url:
+                paper_id = f"url:{url.lower()}"
+            else:
+                paper_id = f"gscholar:title:{title.lower()}"
+
+            papers_by_id[paper_id] = Paper(
+                paper_id=paper_id,
+                title=title,
+                abstract=snippet or summary_text,
+                url=url or "https://scholar.google.com/",
+                authors=authors,
+                published_at_utc=published_at,
+                source="GoogleScholar",
+            )
+
+    return list(papers_by_id.values())
+
 def prefilter_candidates_for_llm(papers: List[Paper], config: AppConfig) -> List[Paper]:
     if not papers:
         return []
@@ -1557,11 +1714,14 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         (
             f"수집 후보: arXiv {stats.arxiv_candidates}건, PubMed {stats.pubmed_candidates}건, "
             f"SemanticScholar {stats.semantic_scholar_candidates}건, "
+            f"GoogleScholar {stats.google_scholar_candidates}건, "
             f"총 {stats.total_candidates}건"
         ),
         f"시간 필터 통과: {stats.post_time_filter_candidates}건",
         f"검색 쿼리 전략: {stats.query_strategy}",
         f"선별 모드: {stats.ranking_mode}",
+        f"발송 주기: {stats.send_frequency}",
+        f"탐색 기간: 최근 {stats.lookback_hours}시간",
     ]
     if stats.ranking_threshold > 0:
         lines.append(f"관련성 임계값: {stats.ranking_threshold:.1f}")
@@ -1578,6 +1738,10 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         lines.append(f"중복 발송 제외: {stats.duplicates_filtered}건")
     if stats.estimated_llm_calls_upper_bound > 0:
         lines.append(f"예상 최대 LLM 호출(1회 실행): {stats.estimated_llm_calls_upper_bound}회")
+    if stats.llm_max_candidates_effective > 0:
+        lines.append(
+            f"LLM 후보 상한: 기본 {stats.llm_max_candidates_base} -> 적용 {stats.llm_max_candidates_effective}"
+        )
     lines.append(f"최종 포함: {stats.final_selected}건")
     return lines
 
@@ -1738,6 +1902,10 @@ def collect_and_rank_papers(
 ) -> Tuple[List[Paper], DigestStats]:
     stats = DigestStats(
         ranking_threshold=config.min_relevance_score,
+        send_frequency=config.send_frequency,
+        lookback_hours=config.lookback_hours,
+        llm_max_candidates_base=config.llm_max_candidates_base,
+        llm_max_candidates_effective=config.llm_max_candidates,
     )
     since_utc = now_utc - timedelta(hours=config.lookback_hours)
     configured_arxiv_queries = dedupe_list(list(config.arxiv_queries))[: config.max_search_queries_per_source]
@@ -1745,9 +1913,13 @@ def collect_and_rank_papers(
     configured_semantic_queries = dedupe_list(list(config.semantic_scholar_queries))[
         : config.max_search_queries_per_source
     ]
+    configured_google_scholar_queries = dedupe_list(list(config.google_scholar_queries))[
+        : config.max_search_queries_per_source
+    ]
     arxiv_queries = list(configured_arxiv_queries)
     pubmed_queries = list(configured_pubmed_queries)
     semantic_queries = list(configured_semantic_queries)
+    google_scholar_queries = list(configured_google_scholar_queries)
     stats.query_strategy = "saved-topics"
     if config.enable_llm_agent and has_llm_provider(config):
         stats.estimated_llm_calls_upper_bound = 1 + (
@@ -1759,21 +1931,25 @@ def collect_and_rank_papers(
     has_active_query = bool(arxiv_queries or pubmed_queries)
     if config.enable_semantic_scholar and semantic_queries:
         has_active_query = True
+    if config.enable_google_scholar and google_scholar_queries:
+        has_active_query = True
     if not has_active_query:
         raise ValueError(
             "검색 쿼리가 비어 있습니다. Topic Editor에서 'Keyword / Query 생성'을 실행하거나 "
-            "Topics / Queries 테이블에 arXiv/PubMed/Semantic Scholar query를 직접 입력 후 Save Topics를 눌러주세요."
+            "Topics / Queries 테이블에 arXiv/PubMed/Semantic Scholar/Google Scholar query를 직접 입력 후 Save Topics를 눌러주세요."
         )
 
     def fetch_from_sources(
         selected_arxiv_queries: List[str],
         selected_pubmed_queries: List[str],
         selected_semantic_queries: List[str],
-    ) -> Tuple[List[Paper], int, int, int]:
+        selected_google_scholar_queries: List[str],
+    ) -> Tuple[List[Paper], int, int, int, int]:
         papers_acc: List[Paper] = []
         arxiv_papers_local: List[Paper] = []
         pubmed_papers_local: List[Paper] = []
         semantic_papers_local: List[Paper] = []
+        google_scholar_papers_local: List[Paper] = []
         if selected_arxiv_queries:
             emit_progress(progress_callback, "Fetching papers from arXiv...", 35)
             logging.info("Fetching papers from arXiv...")
@@ -1805,21 +1981,39 @@ def collect_and_rank_papers(
             logging.info("Skipping Semantic Scholar search: disabled by ENABLE_SEMANTIC_SCHOLAR.")
         else:
             logging.info("Skipping Semantic Scholar search: no configured query.")
+        if config.enable_google_scholar and selected_google_scholar_queries:
+            emit_progress(progress_callback, "Fetching papers from Google Scholar...", 70)
+            logging.info("Fetching papers from Google Scholar...")
+            google_scholar_papers_local = fetch_google_scholar_papers(
+                config,
+                since_utc,
+                now_utc,
+                selected_google_scholar_queries,
+            )
+            logging.info("Google Scholar candidates: %d", len(google_scholar_papers_local))
+            papers_acc.extend(google_scholar_papers_local)
+        elif not config.enable_google_scholar:
+            logging.info("Skipping Google Scholar search: disabled by ENABLE_GOOGLE_SCHOLAR.")
+        else:
+            logging.info("Skipping Google Scholar search: no configured query.")
         return (
             papers_acc,
             len(arxiv_papers_local),
             len(pubmed_papers_local),
             len(semantic_papers_local),
+            len(google_scholar_papers_local),
         )
 
-    all_papers, arxiv_count, pubmed_count, semantic_count = fetch_from_sources(
+    all_papers, arxiv_count, pubmed_count, semantic_count, google_scholar_count = fetch_from_sources(
         arxiv_queries,
         pubmed_queries,
         semantic_queries,
+        google_scholar_queries,
     )
     stats.arxiv_candidates = arxiv_count
     stats.pubmed_candidates = pubmed_count
     stats.semantic_scholar_candidates = semantic_count
+    stats.google_scholar_candidates = google_scholar_count
     stats.total_candidates = len(all_papers)
 
     emit_progress(progress_callback, "Ranking relevant papers...", 75)
@@ -1863,11 +2057,22 @@ def collect_and_rank_papers(
 def run_digest(
     config: AppConfig,
     dry_run: bool = False,
+    force_send: bool = False,
     print_dry_run_output: bool = True,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> str:
     emit_progress(progress_callback, "Starting digest job...", 5)
     now_utc = datetime.now(timezone.utc)
+    if not dry_run and not force_send:
+        should_send_today, next_due_date = evaluate_send_cadence(config, now_utc)
+        if not should_send_today:
+            skipped_message = (
+                f"SEND_FREQUENCY={config.send_frequency} 정책으로 오늘 발송을 건너뜁니다. "
+                f"다음 발송일: {next_due_date:%Y-%m-%d} ({config.timezone_name})"
+            )
+            logging.info(skipped_message)
+            emit_progress(progress_callback, "Skipped by send frequency policy.", 100)
+            return skipped_message
     since_utc = now_utc - timedelta(hours=config.lookback_hours)
     ranked_papers, stats = collect_and_rank_papers(
         config,
@@ -1883,7 +2088,7 @@ def run_digest(
     stats.duplicates_filtered = duplicates_filtered
     stats.final_selected = len(papers)
     emit_progress(progress_callback, "Composing email body...", 95)
-    subject = f"[Daily Paper Digest] {len(papers)} relevant papers ({now_utc.astimezone(config.timezone):%Y-%m-%d})"
+    subject = f"[Paper Digest] {len(papers)} relevant papers ({now_utc.astimezone(config.timezone):%Y-%m-%d})"
     html_body = compose_email_html(papers, now_utc, since_utc, config.timezone_name, stats=stats)
     text_body = compose_email_text(papers, now_utc, since_utc, config.timezone_name, stats=stats)
 
@@ -1928,6 +2133,65 @@ def read_float_env(name: str, default: float) -> float:
     except ValueError:
         logging.warning("Invalid float for %s=%r. Using default %.2f.", name, raw, default)
         return default
+
+
+def normalize_send_frequency(raw: str) -> Tuple[str, int]:
+    value = clean_text(raw).lower()
+    mapping = {
+        "daily": ("daily", 1),
+        "1": ("daily", 1),
+        "1d": ("daily", 1),
+        "every_3_days": ("every_3_days", 3),
+        "3": ("every_3_days", 3),
+        "3d": ("every_3_days", 3),
+        "weekly": ("weekly", 7),
+        "7": ("weekly", 7),
+        "7d": ("weekly", 7),
+    }
+    if value in mapping:
+        return mapping[value]
+    if value:
+        logging.warning("Invalid SEND_FREQUENCY=%r. Using daily.", raw)
+    return "daily", 1
+
+
+def parse_anchor_date(value: str) -> datetime.date:
+    raw = clean_text(value)
+    if not raw:
+        return datetime(2026, 1, 1).date()
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        logging.warning("Invalid SEND_ANCHOR_DATE=%r. Using 2026-01-01.", value)
+        return datetime(2026, 1, 1).date()
+
+
+def scale_llm_max_candidates(base_candidates: int, send_interval_days: int) -> int:
+    safe_base = max(1, min(80, base_candidates))
+    if send_interval_days <= 1:
+        return safe_base
+    scaled = int(round(safe_base * (float(send_interval_days) ** 0.35)))
+    return max(safe_base, min(80, scaled))
+
+
+def evaluate_send_cadence(
+    config: AppConfig,
+    now_utc: datetime,
+) -> Tuple[bool, datetime.date]:
+    now_local_date = now_utc.astimezone(config.timezone).date()
+    if config.send_interval_days <= 1:
+        return True, now_local_date
+
+    anchor_date = parse_anchor_date(config.send_anchor_date)
+    delta_days = (now_local_date - anchor_date).days
+    if delta_days < 0:
+        return False, anchor_date
+
+    remainder = delta_days % config.send_interval_days
+    if remainder == 0:
+        return True, now_local_date
+    next_due = now_local_date + timedelta(days=(config.send_interval_days - remainder))
+    return False, next_due
 
 
 def load_config(require_email_credentials: bool) -> AppConfig:
@@ -1983,6 +2247,23 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         1,
         read_int_env("SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY", 20),
     )
+    enable_google_scholar = os.getenv("ENABLE_GOOGLE_SCHOLAR", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    google_scholar_api_key = resolve_secret_value(
+        "GOOGLE_SCHOLAR_API_KEY",
+        os.getenv("GOOGLE_SCHOLAR_API_KEY", ""),
+    )
+    google_scholar_max_results_per_query = max(
+        1,
+        min(
+            GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT,
+            read_int_env("GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY", 10),
+        ),
+    )
 
     enable_llm_agent = os.getenv("ENABLE_LLM_AGENT", "true").strip().lower() in {
         "1",
@@ -2014,10 +2295,13 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         "yes",
         "on",
     }
+    send_frequency, send_interval_days = normalize_send_frequency(os.getenv("SEND_FREQUENCY", "daily"))
+    send_anchor_date = os.getenv("SEND_ANCHOR_DATE", "2026-01-01").strip() or "2026-01-01"
     gemini_max_papers = max(1, read_int_env("GEMINI_MAX_PAPERS", 5))
     llm_relevance_threshold = read_float_env("LLM_RELEVANCE_THRESHOLD", 7.0)
     llm_batch_size = max(1, read_int_env("LLM_BATCH_SIZE", 5))
-    llm_max_candidates = min(50, max(1, read_int_env("LLM_MAX_CANDIDATES", 30)))
+    llm_max_candidates_base = min(80, max(1, read_int_env("LLM_MAX_CANDIDATES", 30)))
+    llm_max_candidates = scale_llm_max_candidates(llm_max_candidates_base, send_interval_days)
     max_search_queries_per_source = max(1, read_int_env("MAX_SEARCH_QUERIES_PER_SOURCE", 4))
     sent_history_days = max(1, read_int_env("SENT_HISTORY_DAYS", 14))
 
@@ -2026,6 +2310,15 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     send_minute = read_int_env("SEND_MINUTE", 0)
     max_papers = max(1, read_int_env("MAX_PAPERS", 5))
     lookback_hours = max(1, read_int_env("LOOKBACK_HOURS", 24))
+    min_lookback_hours = send_interval_days * 24
+    if lookback_hours < min_lookback_hours:
+        logging.info(
+            "LOOKBACK_HOURS=%d expanded to %d due to SEND_FREQUENCY=%s",
+            lookback_hours,
+            min_lookback_hours,
+            send_frequency,
+        )
+        lookback_hours = min_lookback_hours
     min_relevance_score = read_float_env("MIN_RELEVANCE_SCORE", 6.0)
     arxiv_max_results_per_query = max(1, read_int_env("ARXIV_MAX_RESULTS_PER_QUERY", 25))
     pubmed_max_ids_per_query = max(1, read_int_env("PUBMED_MAX_IDS_PER_QUERY", 25))
@@ -2041,6 +2334,7 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         arxiv_queries,
         pubmed_queries,
         semantic_queries,
+        google_scholar_queries,
     ) = load_topic_configuration(str(user_topics_path))
 
     try:
@@ -2090,6 +2384,10 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         enable_semantic_scholar=enable_semantic_scholar,
         semantic_scholar_api_key=semantic_scholar_api_key,
         semantic_scholar_max_results_per_query=semantic_scholar_max_results_per_query,
+        google_scholar_queries=google_scholar_queries,
+        enable_google_scholar=enable_google_scholar,
+        google_scholar_api_key=google_scholar_api_key,
+        google_scholar_max_results_per_query=google_scholar_max_results_per_query,
         enable_llm_agent=enable_llm_agent,
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
@@ -2100,9 +2398,13 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         gemini_max_papers=gemini_max_papers,
         llm_relevance_threshold=llm_relevance_threshold,
         llm_batch_size=llm_batch_size,
+        llm_max_candidates_base=llm_max_candidates_base,
         llm_max_candidates=llm_max_candidates,
         max_search_queries_per_source=max_search_queries_per_source,
         sent_history_days=sent_history_days,
+        send_frequency=send_frequency,
+        send_interval_days=send_interval_days,
+        send_anchor_date=send_anchor_date,
     )
 
 def parse_args() -> argparse.Namespace:
@@ -2135,10 +2437,11 @@ def start_scheduler(config: AppConfig, dry_run: bool) -> None:
         misfire_grace_time=3600,
     )
     logging.info(
-        "Scheduler started. Next run every day at %02d:%02d (%s).",
+        "Scheduler started. Trigger time %02d:%02d (%s), SEND_FREQUENCY=%s.",
         config.send_hour,
         config.send_minute,
         config.timezone_name,
+        config.send_frequency,
     )
     scheduler.start()
 

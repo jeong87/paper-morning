@@ -354,7 +354,7 @@ def main() -> int:
         gemini_max_papers = prompt_int("Max papers kept after LLM scoring", 5, 1, 200)
         llm_relevance_threshold = prompt_float("LLM relevance pass threshold (1-10)", 7.0, 1.0)
         llm_batch_size = prompt_int("LLM batch size", 5, 1, 50)
-        llm_max_candidates = prompt_int("Max candidates for LLM scoring", 30, 1, 50)
+        llm_max_candidates = prompt_int("Max candidates for LLM scoring", 30, 1, 80)
 
     topics = collect_topics()
     projects = collect_projects()
@@ -367,6 +367,8 @@ def main() -> int:
         "TIMEZONE": timezone_name,
         "SEND_HOUR": str(send_hour),
         "SEND_MINUTE": str(send_minute),
+        "SEND_FREQUENCY": "daily",
+        "SEND_ANCHOR_DATE": "2026-01-01",
         "LOOKBACK_HOURS": str(lookback_hours),
         "MAX_PAPERS": str(max_papers),
         "MIN_RELEVANCE_SCORE": str(min_relevance_score),
@@ -375,6 +377,9 @@ def main() -> int:
         "ENABLE_SEMANTIC_SCHOLAR": "true" if enable_semantic_scholar else "false",
         "SEMANTIC_SCHOLAR_API_KEY": semantic_scholar_api_key,
         "SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY": str(semantic_scholar_max_results),
+        "ENABLE_GOOGLE_SCHOLAR": "false",
+        "GOOGLE_SCHOLAR_API_KEY": "",
+        "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY": "10",
         "MAX_SEARCH_QUERIES_PER_SOURCE": str(max_search_queries),
         "NCBI_API_KEY": ncbi_api_key,
         "USER_TOPICS_FILE": topics_file,

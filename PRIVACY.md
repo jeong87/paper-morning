@@ -1,6 +1,6 @@
 # Privacy Policy (Local App)
 
-Last updated: 2026-03-03
+Last updated: 2026-03-06
 
 ## Summary
 - This app runs on your local machine.
@@ -29,12 +29,14 @@ These files are stored in per-user app data folders:
   - `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi`
 - Semantic Scholar API:
   - `https://api.semanticscholar.org/graph/v1/paper/search`
+- Google Scholar via SerpAPI (if enabled/configured):
+  - `https://serpapi.com/search.json`
 - Google Gemini API (if `GEMINI_API_KEY` is set)
 - Cerebras API (if fallback is enabled and `CEREBRAS_API_KEY` is set)
 - Gmail SMTP (`smtp.gmail.com:465`) for email delivery
 
 ## Data sent to external services
-- Literature queries from `user_topics.json` (arXiv/PubMed/Semantic Scholar query strings)
+- Literature queries from `user_topics.json` (arXiv/PubMed/Semantic Scholar/Google Scholar query strings)
 - Candidate paper metadata (title/abstract/etc.) to LLM providers for relevance scoring/summarization
 - Email content to Gmail SMTP for delivery
 

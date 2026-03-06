@@ -1,257 +1,130 @@
-﻿# Daily Paper Digest (Medical AI)
+﻿# Paper Morning
 
-Version: `paper-morning v0.3.3`  
-Release notes: `CHANGELOG.md`
+![Paper Morning Logo](paper-morning-logo.png)
 
-This app sends a daily paper report by email.
+**Paper Morning**은 의료/AI 연구자를 위한 자동 논문 브리핑 도구입니다.  
+프로젝트 맥락을 넣어두면, 매일(또는 3일/주간) 최신 논문을 모아 관련성 점수 기반으로 선별하고 메일로 전달합니다.
 
-Legal/Privacy:
-- License: `LICENSE` (GNU AGPLv3)
-- Privacy: `PRIVACY.md`
+- 최신 기준 버전: **v0.4.0**
+- 라이선스: `GNU AGPLv3` (`LICENSE`)
+- 개인정보/외부 전송 정책: `PRIVACY.md`
 
-Pipeline (LLM-assisted, saved-query execution):
-1. In `Topic Editor`, generate or manually edit arXiv/PubMed/Semantic Scholar queries, then save them to `user_topics.json`.
-2. Daily run reads the saved queries as-is (no automatic per-run query regeneration).
-3. Collect candidate papers from arXiv, PubMed, and (optionally) Semantic Scholar.
-4. Use Gemini to score relevance for each paper (1-10).
-5. Keep papers with score >= `LLM_RELEVANCE_THRESHOLD` (default 7).
-6. For passed papers, include Korean summaries:
-   - Core point (3-4 short lines)
-   - Why useful for your project (3-4 short lines)
+## 한 줄 요약
+- 내가 정의한 연구 프로젝트 기준으로 논문을 자동 탐색
+- LLM(Gemini, 필요 시 Cerebras 폴백)으로 관련성 평가 + 한국어 요약
+- 스케줄 발송(매일 / 3일마다 / 주간)
+- GitHub Actions 모드로 PC를 꺼도 자동 발송 가능
 
-Fallback:
-- If Gemini fails and Cerebras fallback is enabled/keyed, `gpt-oss-120b` is used as backup.
-- If LLM calls still fail (or no LLM key exists), keyword ranking fallback is used.
-- Already-sent paper IDs are tracked locally and excluded (default: last 14 days).
-- If no search query is configured, digest run is blocked with a setup message.
-- Runtime logs are persisted at `paper-morning.log` and viewable in Web Console `/logs`.
+## 어떤 흐름으로 동작하나요?
+1. Topic Editor에서 프로젝트와 쿼리를 저장합니다.
+2. 소스(arXiv, PubMed, Semantic Scholar, Google Scholar-SerpAPI)에서 논문을 수집합니다.
+3. LLM이 1~10점 관련성 점수를 매깁니다.
+4. 임계값 이상 논문만 한국어 요약과 함께 메일로 전송합니다.
 
-## GitHub Actions Mode (Cloud, Recommended)
+## 주요 기능
+- 프로젝트 맥락 기반 LLM relevance ranking
+- 관련도 점수 분포/통과 건수 진단 리포트
+- 중복 발송 방지(`sent_ids.json`)
+- PubMed 429 자동 재시도/백오프
+- Google Scholar(SerpAPI) 선택 연동
+- 발송 주기 옵션
+  - `daily`
+  - `every_3_days`
+  - `weekly`
+- 3일/주간 주기에서는 LLM 후보 상한(`LLM_MAX_CANDIDATES`)을 비선형 확장
 
-If you do not want to keep your local PC on 24/7, use GitHub Actions.
-
-- Workflow file: `.github/workflows/paper-morning-digest.yml`
-- First-time topic bootstrap workflow: `.github/workflows/paper-morning-bootstrap-topics.yml`
-- Daily schedule: `00:00 UTC` (= `09:00 KST`)
-- Manual trigger supports runner selection:
-  - `ubuntu-latest`
-  - `windows-latest`
-  - `macos-latest`
-- Manual trigger supports:
-  - `send_now` (real email)
-  - `dry_run` (no email)
-
-Required GitHub Secrets:
-- `PM_ENV_FILE`: multiline `.env` content
-- `PM_TOPICS_JSON`: full `user_topics.json` content
-- Optional: `PM_PROJECTS_JSON` (projects-only JSON for bootstrap workflow)
-
-Runtime behavior in Actions:
-1. `scripts/gha_prepare_runtime.py` restores runtime files under `ci_runtime/`.
-2. App runs once via `python paper_digest_app.py --run-once` (or `--dry-run`).
-3. Logs are uploaded as workflow artifacts.
-
-Bootstrap behavior:
-1. Run `paper-morning-bootstrap-topics` workflow.
-2. It generates `generated_user_topics.json` from projects using LLM.
-3. Copy generated JSON into secret `PM_TOPICS_JSON`.
-
-See `MANUAL_KR.md` for full Korean setup instructions.
-
-## Quick Start
-
-1) Install dependencies
+## 빠른 시작 (로컬 UI)
+1. 의존성 설치
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2) Run onboarding wizard (`.env` + `user_topics.json`)
-
-```bash
-python onboarding_wizard.py
-```
-
-3) Dry-run test
-
-```bash
-python paper_digest_app.py --run-once --dry-run
-```
-
-4) Real send now
-
-```bash
-python paper_digest_app.py --run-once
-```
-
-## Web Console
-
-Run local web UI (Python):
+2. 웹 콘솔 실행
 
 ```bash
 python web_app.py --host 127.0.0.1 --port 5050
 ```
 
-One-click local launcher (opens browser automatically):
+또는
 
-```bat
-start_web_console.bat
-```
+- Windows: `start_web_console.bat`
+- Linux/macOS: `./start_web_console.sh`
 
-Linux/macOS (Python environment):
-
-```bash
-./start_web_console.sh
-```
-
-Open browser:
+3. 브라우저에서 접속
 
 ```text
 http://127.0.0.1:5050
 ```
 
-First launch behavior:
-- If core settings are missing, Web Console redirects to `Setup Wizard`.
-- `Send Now` is protected by cooldown (`SEND_NOW_COOLDOWN_SECONDS`, default 300s).
-- Home page includes `Windows Task` action to register Windows Task Scheduler automatically.
-- Home page now includes Google OAuth connection/status panel (`Google 로그인 연결` / `연결 해제`).
+4. Setup Wizard / Settings에서 키 입력 후 Topic Editor에서 쿼리 저장
 
-## Local vs Web Hosting
+## GitHub Actions 모드 (권장)
+로컬 PC를 24시간 켜두기 어렵다면 Actions 모드가 가장 편합니다.
 
-- Local PC mode: your computer must be ON at send time (e.g., 09:00).
-- Hosted web mode: if deployed to an always-on server, your local PC does not need to be ON.
-- Security:
-  - non-local host (`--host` not `127.0.0.1`) is blocked by default.
-  - set `ALLOW_INSECURE_REMOTE_WEB=true` + `WEB_PASSWORD` only for controlled temporary testing.
-  - production remote use should be behind HTTPS reverse proxy.
+### 필수 워크플로우
+- 자동 발송: `.github/workflows/paper-morning-digest.yml`
+- 초기 쿼리 자동생성: `.github/workflows/paper-morning-bootstrap-topics.yml`
 
-## Config Persistence (Packaged App)
+### 필수 Secret
+- `PM_ENV_FILE` : `.env` 전체 내용
+- `PM_TOPICS_JSON` : `user_topics.json` 전체 내용
 
-- Packaged executables now store `.env` and `user_topics.json` in a per-user data folder.
-- On first launch, legacy settings in the executable folder are auto-migrated.
-- This prevents settings loss when replacing `dist` files during updates.
-- Source launcher (`start_web_console.bat` / `start_web_console.sh`) now uses the same per-user config path.
+### 선택 Secret
+- `PM_PROJECTS_JSON` : 프로젝트 목록만 담은 JSON (초기 쿼리 생성용)
 
-## Required Keys
+### 스케줄
+- 워크플로우 트리거는 매일 09:00 KST(= 00:00 UTC)
+- 실제 메일 발송은 `SEND_FREQUENCY` 정책(`daily/every_3_days/weekly`)에 따라 결정
 
-Required:
-- `GMAIL_ADDRESS`
-- One of:
-  - `GMAIL_APP_PASSWORD` (legacy SMTP mode), or
-  - Google OAuth connection (`ENABLE_GOOGLE_OAUTH=true`, connected `GOOGLE_OAUTH_REFRESH_TOKEN`)
+## 핵심 설정값
+`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`
+- 발송 주기 제어
+- `SEND_ANCHOR_DATE`를 기준으로 3일/7일 주기 계산
 
-Recommended:
-- `GEMINI_API_KEY` (for LLM-first ranking)
+`LOOKBACK_HOURS`
+- 최근 몇 시간 이내 논문을 수집할지 설정
+- 주기형 발송에서는 최소 주기 길이(예: weekly면 최소 168h)로 자동 보정
 
-Optional:
-- `NCBI_API_KEY` (higher PubMed throughput)
-- `SEMANTIC_SCHOLAR_API_KEY` (Semantic Scholar quota)
+`LLM_MAX_CANDIDATES`
+- 기본 후보 상한
+- 3일/주간 주기에서는 토큰 폭증을 막기 위해 비선형 확장 적용
 
-## Main Environment Variables
+`ENABLE_GOOGLE_SCHOLAR` / `GOOGLE_SCHOLAR_API_KEY`
+- Google Scholar 수집 활성화(SerpAPI 키 필요)
 
-- `ENABLE_LLM_AGENT=true`
-- `ENABLE_GEMINI_ADVANCED_REASONING=false` (when `true`, force `gemini-3.1-pro`)
-- `GEMINI_MODEL=gemini-3.1-flash`
-- `USE_KEYRING=true`
-- `ENABLE_GOOGLE_OAUTH=false`
-- `GOOGLE_OAUTH_USE_FOR_GMAIL=true`
-- `GOOGLE_OAUTH_CLIENT_ID=...`
-- `GOOGLE_OAUTH_CLIENT_SECRET=...`
-- `GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:5050/oauth/google/callback` (optional)
-- `LLM_RELEVANCE_THRESHOLD=7`
-- `LLM_BATCH_SIZE=5`
-- `LLM_MAX_CANDIDATES=30` (runtime max: 50)
-- `MAX_SEARCH_QUERIES_PER_SOURCE=4`
-- `ENABLE_SEMANTIC_SCHOLAR=true`
-- `SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY=20`
-- `MAX_PAPERS=5`
+## 소스별 참고
+- arXiv: 기본 제공
+- PubMed: `NCBI_API_KEY` 넣으면 안정성 향상
+- Semantic Scholar: API 키 권장
+- Google Scholar: 공식 API가 아니라 SerpAPI 연동 방식
 
-See `.env.example` for the full list.
-
-## Google Auto-Connect (OAuth)
-
-If you want "Google login -> automatic Gmail linkage" without app-password:
-
-1. In Google Cloud Console, create OAuth client credentials (Web application).
-2. Add Authorized Redirect URI:
-   - `http://127.0.0.1:5050/oauth/google/callback`
-   - (optional) `http://localhost:5050/oauth/google/callback`
-3. In Web Console `Settings`, set:
-   - `ENABLE_GOOGLE_OAUTH=true`
-   - `GOOGLE_OAUTH_CLIENT_ID`
-   - `GOOGLE_OAUTH_CLIENT_SECRET`
-4. Click `Google 로그인 연결` and complete consent.
-5. The app stores refresh token (`GOOGLE_OAUTH_REFRESH_TOKEN`) and uses Gmail API send path automatically.
-
-Distributor mode (recommended for beta/public users):
-- Put `google_oauth_bundle.json` (with `client_id`, `client_secret`, optional `redirect_uri`) next to the executable.
-- End users can then click `Google 로그인 연결` directly from **Home** without manually entering client ID/secret in Settings.
-
-Notes:
-- If OAuth send fails, app falls back to SMTP only when `GMAIL_APP_PASSWORD` exists.
-- With `USE_KEYRING=true`, OAuth secrets are stored via OS keychain reference.
-
-## user_topics.json format
-
-```json
-{
-  "projects": [
-    {
-      "name": "Retina Stroke/CAC",
-      "context": "Fundus-based stroke and CAC risk prediction pipeline."
-    }
-  ],
-  "topics": [
-    {
-      "name": "Retina + Stroke/CAC",
-      "keywords": ["fundus", "retina", "stroke", "cac"],
-      "arxiv_query": "(all:fundus OR all:retina) AND (all:stroke OR all:CAC)",
-      "pubmed_query": "(fundus OR retina) AND (stroke OR CAC)",
-      "semantic_scholar_query": "fundus retina stroke CAC risk prediction deep learning"
-    }
-  ]
-}
-```
-
-- `projects` is used as LLM prompt context (relevance scoring/summarization + query generation button in Topic Editor).
-- `topics` stores the single active query state used by daily runs.
-
-## Windows Packaging
-
-Build executables:
-
+## 배포 파일 만들기
+### Windows
 ```powershell
 .\build_windows.ps1
 ```
 
-Main files for end users:
-- `dist\PaperDigestLocalUI.exe` (double-click: server starts + browser opens)
-- `dist\PaperDigestSetup.exe` (interactive setup wizard)
-- `dist\PaperDigest.exe` (CLI scheduler/one-shot sender)
-- `dist\.env.example`, `dist\google_oauth_bundle.template.json`, `dist\user_topics.template.json`, `dist\MANUAL_KR.md`, `dist\LICENSE`, `dist\PRIVACY.md` (support files)
-
-Register daily task (09:00):
-
-```powershell
-.\register_task.ps1 -UseExe -RunAt "09:00" -TaskName "DailyPaperDigest"
-```
-
-## Linux Packaging
-
-Build executables on Linux:
-
+### Linux
 ```bash
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
 
-Main files for end users:
-- `dist/PaperDigestLocalUI` (launch local web console)
-- `dist/PaperDigestSetup` (interactive setup wizard)
-- `dist/PaperDigest` (CLI scheduler/one-shot sender)
-- `dist/.env.example`, `dist/google_oauth_bundle.template.json`, `dist/user_topics.template.json`, `dist/MANUAL_KR.md`, `dist/LICENSE`, `dist/PRIVACY.md` (support files)
+## 문제 해결 빠른 체크
+- `검색 쿼리 없음`: Topic Editor에서 쿼리 생성 후 저장했는지 확인
+- `PubMed 429`: 앱이 자동 재시도하지만, `NCBI_API_KEY` 설정 권장
+- `Gemini 모델 404`: 모델명 확인 (`gemini-3.1-flash` 또는 지원 모델)
+- 메일 미수신: 발신/수신 주소, 스팸함, 인증 방식 확인
 
-Notes:
-- Linux binary must be built on Linux.
-- For daily 09:00 run, register cron/systemd timer on the target Linux machine.
+## 인증 방식 우선순위
+1. **Google OAuth (권장)**
+2. **Gmail 앱 비밀번호 (레거시/호환용)**
 
+### Gmail 앱 비밀번호(레거시) 안내
+- 일반 계정 비밀번호가 아닙니다.
+- 2단계 인증 활성화 후 16자리 앱 비밀번호를 사용해야 합니다.
+- 발급 링크: https://myaccount.google.com/apppasswords
+
+## 문의
+- `nineclas@gmail.com`
