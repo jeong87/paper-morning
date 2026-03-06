@@ -231,6 +231,10 @@ SEMANTIC_SCHOLAR_API_KEY=
 - `RECENT_HOURS`가 너무 짧거나 쿼리가 과도하게 좁음
 - 해결: 시간창 확대(예: 120), 쿼리 완화, threshold 점검
 
+5. `PubMed 429 Too Many Requests`
+- 앱이 자동 재시도/백오프를 수행하며, 일부 쿼리는 스킵 후 나머지 소스로 계속 진행합니다.
+- 안정화를 위해 `NCBI_API_KEY` 설정을 권장합니다.
+
 ## 11) Linux/Windows/macOS 관련 안내
 - 실행 환경은 GitHub 러너이므로 로컬 OS 준비가 필요 없습니다.
 - 수동 실행에서 러너 OS를 바꿔 동일 워크플로우를 검증할 수 있습니다.

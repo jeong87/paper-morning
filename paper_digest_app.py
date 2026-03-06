@@ -50,6 +50,12 @@ ARXIV_MAX_RETRY_ATTEMPTS = 3
 ARXIV_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 ARXIV_QUERY_INTERVAL_SECONDS = 1.0
 ARXIV_MAX_RESULTS_HARD_LIMIT = 50
+PUBMED_MAX_RETRY_ATTEMPTS = 4
+PUBMED_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+PUBMED_QUERY_INTERVAL_NO_KEY_SECONDS = 0.45
+PUBMED_QUERY_INTERVAL_WITH_KEY_SECONDS = 0.12
+PUBMED_RETRY_BACKOFF_BASE_SECONDS = 1.0
+PUBMED_RETRY_BACKOFF_MAX_SECONDS = 8.0
 SEMANTIC_SCHOLAR_QUERY_INTERVAL_SECONDS = 1.0
 SEMANTIC_SCHOLAR_MAX_RESULTS_HARD_LIMIT = 100
 SEMANTIC_SCHOLAR_FIELDS = (
@@ -1066,9 +1072,12 @@ def fetch_arxiv_papers(config: AppConfig, since_utc: datetime, queries: List[str
 
 
 def fetch_pubmed_ids(query: str, config: AppConfig) -> List[str]:
+    normalized_query = re.sub(r"\*{2,}", "", clean_text(query))
+    if not normalized_query:
+        return []
     params = {
         "db": "pubmed",
-        "term": query,
+        "term": normalized_query,
         "retmax": config.pubmed_max_ids_per_query,
         "sort": "pub date",
         "reldate": max(1, int(config.lookback_hours / 24) + 1),
@@ -1077,8 +1086,7 @@ def fetch_pubmed_ids(query: str, config: AppConfig) -> List[str]:
     }
     if config.ncbi_api_key:
         params["api_key"] = config.ncbi_api_key
-    response = requests.get(PUBMED_ESEARCH_URL, params=params, timeout=HTTP_TIMEOUT_SECONDS)
-    response.raise_for_status()
+    response = request_pubmed_with_retry(PUBMED_ESEARCH_URL, params, config, "esearch")
     payload = response.json()
     return payload.get("esearchresult", {}).get("idlist", [])
 
@@ -1089,8 +1097,7 @@ def fetch_pubmed_summaries(pubmed_ids: List[str], config: AppConfig) -> Dict[str
     params = {"db": "pubmed", "id": ",".join(pubmed_ids), "retmode": "json"}
     if config.ncbi_api_key:
         params["api_key"] = config.ncbi_api_key
-    response = requests.get(PUBMED_ESUMMARY_URL, params=params, timeout=HTTP_TIMEOUT_SECONDS)
-    response.raise_for_status()
+    response = request_pubmed_with_retry(PUBMED_ESUMMARY_URL, params, config, "esummary")
     payload = response.json()
     result = payload.get("result", {})
     return {pmid: result[pmid] for pmid in result.get("uids", []) if pmid in result}
@@ -1107,8 +1114,7 @@ def fetch_pubmed_abstracts(pubmed_ids: List[str], config: AppConfig) -> Dict[str
         params = {"db": "pubmed", "id": ",".join(batch), "retmode": "xml"}
         if config.ncbi_api_key:
             params["api_key"] = config.ncbi_api_key
-        response = requests.get(PUBMED_EFETCH_URL, params=params, timeout=HTTP_TIMEOUT_SECONDS)
-        response.raise_for_status()
+        response = request_pubmed_with_retry(PUBMED_EFETCH_URL, params, config, "efetch")
         root = ElementTree.fromstring(response.text)
         for article in root.findall(".//PubmedArticle"):
             pmid = article.findtext(".//PMID")
@@ -1129,15 +1135,38 @@ def fetch_pubmed_abstracts(pubmed_ids: List[str], config: AppConfig) -> Dict[str
 def fetch_pubmed_papers(config: AppConfig, since_utc: datetime, queries: List[str]) -> List[Paper]:
     all_ids: List[str] = []
     seen_ids = set()
-    for query in queries:
-        ids = fetch_pubmed_ids(query, config)
+    for idx, query in enumerate(queries):
+        if idx > 0:
+            interval = (
+                PUBMED_QUERY_INTERVAL_WITH_KEY_SECONDS
+                if config.ncbi_api_key
+                else PUBMED_QUERY_INTERVAL_NO_KEY_SECONDS
+            )
+            time.sleep(interval)
+        try:
+            ids = fetch_pubmed_ids(query, config)
+        except Exception as exc:
+            logging.warning("Skipping PubMed query due to failure: %s | query=%s", exc, query)
+            continue
         for pmid in ids:
             if pmid not in seen_ids:
                 all_ids.append(pmid)
                 seen_ids.add(pmid)
 
-    summaries = fetch_pubmed_summaries(all_ids, config)
-    abstracts = fetch_pubmed_abstracts(all_ids, config)
+    if not all_ids:
+        return []
+
+    try:
+        summaries = fetch_pubmed_summaries(all_ids, config)
+    except Exception as exc:
+        logging.warning("Failed to fetch PubMed summaries; skipping PubMed source: %s", exc)
+        return []
+
+    try:
+        abstracts = fetch_pubmed_abstracts(all_ids, config)
+    except Exception as exc:
+        logging.warning("Failed to fetch PubMed abstracts; continuing without abstracts: %s", exc)
+        abstracts = {}
 
     papers: List[Paper] = []
     for pmid in all_ids:
@@ -1161,6 +1190,80 @@ def fetch_pubmed_papers(config: AppConfig, since_utc: datetime, queries: List[st
             )
         )
     return papers
+
+
+def parse_retry_after_seconds(value: str) -> float | None:
+    raw = clean_text(value)
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return None
+    if seconds < 0:
+        return None
+    return seconds
+
+
+def request_pubmed_with_retry(
+    url: str,
+    params: Dict[str, Any],
+    config: AppConfig,
+    operation: str,
+) -> requests.Response:
+    last_error: Exception | None = None
+    for attempt in range(1, PUBMED_MAX_RETRY_ATTEMPTS + 1):
+        try:
+            response = requests.get(url, params=params, timeout=HTTP_TIMEOUT_SECONDS)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= PUBMED_MAX_RETRY_ATTEMPTS:
+                break
+            sleep_seconds = min(
+                PUBMED_RETRY_BACKOFF_MAX_SECONDS,
+                PUBMED_RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)),
+            )
+            logging.warning(
+                "PubMed %s request exception (attempt %d/%d). Retrying in %.1fs: %s",
+                operation,
+                attempt,
+                PUBMED_MAX_RETRY_ATTEMPTS,
+                sleep_seconds,
+                mask_sensitive_text(str(exc)),
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        if response.status_code in PUBMED_RETRYABLE_STATUS_CODES and attempt < PUBMED_MAX_RETRY_ATTEMPTS:
+            retry_after = parse_retry_after_seconds(response.headers.get("Retry-After", ""))
+            sleep_seconds = retry_after
+            if sleep_seconds is None:
+                sleep_seconds = min(
+                    PUBMED_RETRY_BACKOFF_MAX_SECONDS,
+                    PUBMED_RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)),
+                )
+            logging.warning(
+                "PubMed %s returned %s (attempt %d/%d). Retrying in %.1fs. url=%s",
+                operation,
+                response.status_code,
+                attempt,
+                PUBMED_MAX_RETRY_ATTEMPTS,
+                sleep_seconds,
+                mask_sensitive_text(response.url or url),
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        try:
+            response.raise_for_status()
+            return response
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if last_error:
+        raise RuntimeError(f"PubMed {operation} request failed after retries: {last_error}") from last_error
+    raise RuntimeError(f"PubMed {operation} request failed without response.")
 
 
 def fetch_semantic_scholar_papers(
