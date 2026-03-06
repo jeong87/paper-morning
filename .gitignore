@@ -1,0 +1,9 @@
+dist/
+build/
+__pycache__/
+*.pyc
+.env
+user_topics.json
+google_oauth_bundle.json
+ci_runtime/
+*.zip
