@@ -53,6 +53,7 @@ if (Test-Path "google_oauth_bundle.json") {
 }
 Copy-Item -Force user_topics.template.json dist\user_topics.template.json
 Copy-Item -Force MANUAL_KR.md dist\MANUAL_KR.md
+Copy-Item -Force MANUAL_FIRSTTIME_KR.md dist\MANUAL_FIRSTTIME_KR.md
 Copy-Item -Force README.md dist\README.md
 Copy-Item -Force LICENSE dist\LICENSE
 Copy-Item -Force PRIVACY.md dist\PRIVACY.md
@@ -67,4 +68,4 @@ Write-Host "Build complete."
 Write-Host "App executable: dist\PaperDigest.exe"
 Write-Host "Setup executable: dist\PaperDigestSetup.exe"
 Write-Host "One-click local UI executable: dist\PaperDigestLocalUI.exe"
-Write-Host "Support files: dist\.env.example, dist\google_oauth_bundle.template.json, dist\user_topics.template.json, dist\paper-morning-logo.png, dist\MANUAL_KR.md, dist\README.md, dist\LICENSE, dist\PRIVACY.md, dist\VERSION, dist\CHANGELOG.md, dist\register_task.ps1"
+Write-Host "Support files: dist\.env.example, dist\google_oauth_bundle.template.json, dist\user_topics.template.json, dist\paper-morning-logo.png, dist\MANUAL_KR.md, dist\MANUAL_FIRSTTIME_KR.md, dist\README.md, dist\LICENSE, dist\PRIVACY.md, dist\VERSION, dist\CHANGELOG.md, dist\register_task.ps1"

@@ -15,6 +15,10 @@
 - 스케줄 발송(매일 / 3일마다 / 주간)
 - GitHub Actions 모드로 PC를 꺼도 자동 발송 가능
 
+## 처음 사용자라면 여기부터
+- 완전 초보자용 단계별 가이드: `MANUAL_FIRSTTIME_KR.md`
+- 운영/고급 설정까지 포함된 전체 매뉴얼: `MANUAL_KR.md`
+
 ## 어떤 흐름으로 동작하나요?
 1. Topic Editor에서 프로젝트와 쿼리를 저장합니다.
 2. 소스(arXiv, PubMed, Semantic Scholar, Google Scholar-SerpAPI)에서 논문을 수집합니다.
