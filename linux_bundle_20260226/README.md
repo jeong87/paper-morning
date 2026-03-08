@@ -16,7 +16,7 @@
 - GitHub Actions 모드로 PC를 꺼도 자동 발송 가능
 
 ## 처음 사용자라면 여기부터
-- 완전 초보자용 단계별 가이드: `MANUAL_FIRSTTIME_KR.md`
+- 초보자용 단계별 가이드: `MANUAL_FIRSTTIME_KR.md`
 - 운영/고급 설정까지 포함된 전체 매뉴얼: `MANUAL_KR.md`
 
 ## 어떤 흐름으로 동작하나요?
@@ -118,7 +118,7 @@ chmod +x build_linux.sh
 ## 문제 해결 빠른 체크
 - `검색 쿼리 없음`: Topic Editor에서 쿼리 생성 후 저장했는지 확인
 - `PubMed 429`: 앱이 자동 재시도하지만, `NCBI_API_KEY` 설정 권장
-- `Gemini 모델 404`: 모델명 확인 (`gemini-3.1-flash` 또는 지원 모델)
+- `Gemini 모델 404`: 모델명 확인 (`gemini-3.1-pro` 또는 `gemini-3.1-flash`)
 - 메일 미수신: 발신/수신 주소, 스팸함, 인증 방식 확인
 
 ## 인증 방식 우선순위

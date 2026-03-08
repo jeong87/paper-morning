@@ -1,4 +1,4 @@
-# Paper Morning 초보자용 매뉴얼 (완전 떠먹여주는 버전)
+# Paper Morning 초보자용 매뉴얼
 
 이 문서는 "처음 설치하는 사용자"를 위한 안내입니다.
 아래 순서대로만 하면, 내 PC를 켜두지 않아도 GitHub Actions가 매일 자동으로 메일을 보냅니다.
@@ -36,9 +36,13 @@
 링크:
 - https://aistudio.google.com/app/apikey
 
-## 4. GitHub에 코드 올리기
-1. GitHub에서 새 Repository를 만듭니다.
-2. 로컬 프로젝트 폴더에서 아래 명령 실행:
+## 4. 저장소 준비 (Fork 권장)
+1. 원본 Paper Morning 저장소 페이지에서 `Fork`를 누릅니다.
+2. 내 계정으로 복사된 저장소(내 fork)를 엽니다.
+3. 이후 설정/실행은 내 fork 저장소에서 진행하면 됩니다.
+
+선택:
+- 직접 새 저장소에 올리고 싶다면 아래 명령으로 진행해도 됩니다.
 
 ```bash
 git init
@@ -49,7 +53,7 @@ git remote add origin https://github.com/<내계정>/<내레포>.git
 git push -u origin main
 ```
 
-3. GitHub 웹에서 `.github/workflows/` 폴더가 보이면 정상입니다.
+4. GitHub 웹에서 `.github/workflows/` 폴더가 보이면 정상입니다.
 
 ## 5. Secrets 2개 등록 (핵심)
 경로:
@@ -85,7 +89,7 @@ GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY=10
 
 ENABLE_LLM_AGENT=true
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.1-flash
+GEMINI_MODEL=gemini-3.1-pro
 ENABLE_GEMINI_ADVANCED_REASONING=true
 LLM_BATCH_SIZE=5
 LLM_MAX_CANDIDATES=30
@@ -99,6 +103,12 @@ NCBI_API_KEY=
 SEMANTIC_SCHOLAR_API_KEY=
 GOOGLE_SCHOLAR_API_KEY=
 ```
+
+LLM 동작 순서(기본):
+1. `ENABLE_GEMINI_ADVANCED_REASONING=true`면 기본 모델은 `gemini-3.1-pro`
+2. `gemini-3.1-pro` 실패 시 `gemini-3.1-flash` 재시도
+3. 그래도 실패 시 `gemini-2.5-flash` 재시도
+4. Gemini 전체 실패 + Cerebras 키가 있으면 `gpt-oss-120b`로 폴백
 
 ### 5-2) PM_TOPICS_JSON 값 예시
 아래를 그대로 붙여넣고 시작해도 됩니다.
@@ -156,7 +166,7 @@ GOOGLE_SCHOLAR_API_KEY=
 
 3. `Not Found ... gemini-...:generateContent`
 원인: 잘못된 모델명
-해결: `GEMINI_MODEL=gemini-3.1-flash`로 변경
+해결: `GEMINI_MODEL`을 `gemini-3.1-pro` 또는 `gemini-3.1-flash`로 변경
 
 4. `query keyword 없음`
 원인: topics 쿼리 비어 있음

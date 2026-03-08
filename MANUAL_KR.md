@@ -9,7 +9,7 @@
 - `MANUAL_KR_LOCAL_LEGACY_v033.md`
 
 처음 설치하는 사용자는 아래 문서를 먼저 보세요.
-- `MANUAL_FIRSTTIME_KR.md` (완전 초보자용)
+- `MANUAL_FIRSTTIME_KR.md` (초보자용 단계별 가이드)
 
 ## 1) 이 버전의 핵심
 - 매일 아침 9시(KST)에 GitHub 서버에서 자동 실행
@@ -78,7 +78,7 @@ GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY=10
 # LLM
 ENABLE_LLM_AGENT=true
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.1-flash
+GEMINI_MODEL=gemini-3.1-pro
 ENABLE_GEMINI_ADVANCED_REASONING=true
 LLM_BATCH_SIZE=5
 LLM_MAX_CANDIDATES=30
