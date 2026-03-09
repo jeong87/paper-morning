@@ -228,6 +228,7 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
         f"GEMINI_API_KEY={values_to_write['GEMINI_API_KEY']}",
         f"ENABLE_GEMINI_ADVANCED_REASONING={values_to_write['ENABLE_GEMINI_ADVANCED_REASONING']}",
         f"GEMINI_MODEL={values_to_write['GEMINI_MODEL']}",
+        f"OUTPUT_LANGUAGE={values_to_write['OUTPUT_LANGUAGE']}",
         f"ENABLE_CEREBRAS_FALLBACK={values_to_write['ENABLE_CEREBRAS_FALLBACK']}",
         f"CEREBRAS_API_KEY={values_to_write['CEREBRAS_API_KEY']}",
         f"CEREBRAS_MODEL={values_to_write['CEREBRAS_MODEL']}",
@@ -320,6 +321,7 @@ def main() -> int:
     gemini_api_key = ""
     enable_gemini_advanced_reasoning = True
     gemini_model = "gemini-3.1-flash"
+    output_language = "en"
     enable_cerebras_fallback = True
     cerebras_api_key = ""
     cerebras_model = "gpt-oss-120b"
@@ -335,6 +337,10 @@ def main() -> int:
             default_yes=True,
         )
         gemini_model = prompt_text("Gemini model", default="gemini-3.1-flash")
+        output_language = prompt_text(
+            "Summary output language code (e.g., en, ko, ja, es)",
+            default="en",
+        )
         enable_cerebras_fallback = prompt_yes_no(
             "Enable Cerebras fallback when Gemini fails?",
             default_yes=True,
@@ -400,6 +406,7 @@ def main() -> int:
         "GEMINI_API_KEY": gemini_api_key,
         "ENABLE_GEMINI_ADVANCED_REASONING": "true" if enable_gemini_advanced_reasoning else "false",
         "GEMINI_MODEL": gemini_model,
+        "OUTPUT_LANGUAGE": output_language,
         "ENABLE_CEREBRAS_FALLBACK": "true" if enable_cerebras_fallback else "false",
         "CEREBRAS_API_KEY": cerebras_api_key,
         "CEREBRAS_MODEL": cerebras_model,

@@ -2,6 +2,38 @@
 
 All notable changes to **paper-morning** are documented in this file.
 
+## [0.5.0] - 2026-03-09
+
+### Added
+- Added globalization planning doc: `GLOBALIZATION_PLAN_v0.5.md`.
+- Added output-language control for LLM summaries:
+  - new env key `OUTPUT_LANGUAGE` (default `en`)
+  - used in LLM ranking prompt for relevance reason/core point/usefulness text.
+- Added demo generation script:
+  - `scripts/generate_demo_html.py`
+  - generated output file: `docs/demo/index.html`
+- Added GitHub Pages deployment workflow for demo:
+  - `.github/workflows/deploy-demo-pages.yml`
+
+### Changed
+- Reworked digest email visual design:
+  - stronger score emphasis with color-coded badge
+  - improved card spacing, typography, borders, divider
+  - larger paper title for readability
+- Converted backend report diagnostics text from Korean to English.
+- Converted LLM output labels from KR-specific wording to language-neutral wording.
+- Root README rewritten in English for global users.
+- Added Korean README backup copy as `README_KR.md`.
+
+### Config/UI
+- Added `OUTPUT_LANGUAGE` support to:
+  - `.env.example`
+  - Web Console env schema/defaults and settings forms
+  - Onboarding wizard env writer/prompt flow
+
+### Version
+- App version bumped to `paper-morning v0.5.0`.
+
 ## [0.4.1] - 2026-03-09
 
 ### Changed

@@ -46,6 +46,9 @@ cp -f user_topics.template.json dist/user_topics.template.json
 cp -f MANUAL_KR.md dist/MANUAL_KR.md
 cp -f MANUAL_FIRSTTIME_KR.md dist/MANUAL_FIRSTTIME_KR.md
 cp -f README.md dist/README.md
+if [ -f "README_KR.md" ]; then
+  cp -f README_KR.md dist/README_KR.md
+fi
 cp -f LICENSE dist/LICENSE
 cp -f PRIVACY.md dist/PRIVACY.md
 cp -f VERSION dist/VERSION
@@ -59,4 +62,4 @@ echo "Build complete."
 echo "App executable: dist/PaperDigest"
 echo "Setup executable: dist/PaperDigestSetup"
 echo "One-click local UI executable: dist/PaperDigestLocalUI"
-echo "Support files: dist/.env.example, dist/google_oauth_bundle.template.json, dist/user_topics.template.json, dist/paper-morning-logo.png, dist/MANUAL_KR.md, dist/MANUAL_FIRSTTIME_KR.md, dist/README.md, dist/LICENSE, dist/PRIVACY.md, dist/VERSION, dist/CHANGELOG.md, dist/register_task.ps1"
+echo "Support files: dist/.env.example, dist/google_oauth_bundle.template.json, dist/user_topics.template.json, dist/paper-morning-logo.png, dist/MANUAL_KR.md, dist/MANUAL_FIRSTTIME_KR.md, dist/README.md, dist/README_KR.md, dist/LICENSE, dist/PRIVACY.md, dist/VERSION, dist/CHANGELOG.md, dist/register_task.ps1"

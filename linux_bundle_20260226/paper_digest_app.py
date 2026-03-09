@@ -155,6 +155,7 @@ class AppConfig:
     send_frequency: str
     send_interval_days: int
     send_anchor_date: str
+    output_language: str
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -918,14 +919,14 @@ def parse_json_loose(text: str) -> Any:
         try:
             return json.loads(candidate)
         except json.JSONDecodeError as exc:
-            # LLM이 JSON 문자열 내부의 역슬래시를 잘못 이스케이프하는 경우를 복구한다.
+            # Repair malformed escape sequences inside JSON strings from LLM output.
             repaired = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", candidate)
             if repaired != candidate:
                 try:
                     return json.loads(repaired)
                 except json.JSONDecodeError:
                     pass
-            # 일부 모델 응답은 문자열 내부 개행/제어문자를 탈출하지 않고 반환한다.
+            # Some models return unescaped control chars/newlines inside strings.
             try:
                 return json.loads(candidate, strict=False)
             except json.JSONDecodeError:
@@ -1652,6 +1653,7 @@ def annotate_papers_with_llm(
     project_context = build_project_context_text(config.research_projects)
     by_id = {paper.paper_id: paper for paper in papers}
     min_score = config.llm_relevance_threshold
+    output_language = output_language_display_name(config.output_language)
 
     for batch in chunk_list(papers, max(1, config.llm_batch_size)):
         payload_items = []
@@ -1672,18 +1674,18 @@ def annotate_papers_with_llm(
             f"{project_context}\n\n"
             "For each paper, do the following:\n"
             "1) score relevance from 1 to 10\n"
-            "2) write one short Korean relevance reason\n"
-            "3) write Korean core-point summary in 3-4 short lines\n"
-            "4) write Korean usefulness explanation in 3-4 short lines\n\n"
+            f"2) write one short relevance reason in {output_language}\n"
+            f"3) write core-point summary in {output_language} using 3-4 short lines\n"
+            f"4) write usefulness explanation in {output_language} using 3-4 short lines\n\n"
             "Return ONLY JSON object:\n"
             "{\n"
             '  "items": [\n'
             "    {\n"
             '      "id": "...",\n'
             '      "relevance_score": 1,\n'
-            '      "relevance_reason_ko": "...",\n'
-            '      "core_point_ko": "...",\n'
-            '      "usefulness_ko": "..."\n'
+            '      "relevance_reason": "...",\n'
+            '      "core_point": "...",\n'
+            '      "usefulness": "..."\n'
             "    }\n"
             "  ]\n"
             "}\n"
@@ -1709,9 +1711,15 @@ def annotate_papers_with_llm(
             except (TypeError, ValueError):
                 score = 0.0
             paper.score = max(0.0, min(10.0, score))
-            paper.llm_relevance_ko = clean_text(str(item.get("relevance_reason_ko", "")))
-            paper.llm_core_point_ko = clean_text(str(item.get("core_point_ko", "")))
-            paper.llm_usefulness_ko = clean_text(str(item.get("usefulness_ko", "")))
+            paper.llm_relevance_ko = clean_text(
+                str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
+            )
+            paper.llm_core_point_ko = clean_text(
+                str(item.get("core_point", item.get("core_point_ko", "")))
+            )
+            paper.llm_usefulness_ko = clean_text(
+                str(item.get("usefulness", item.get("usefulness_ko", "")))
+            )
             paper.topic = "LLM-Relevance"
 
     selected = [paper for paper in papers if paper.score >= min_score]
@@ -1813,53 +1821,63 @@ def format_score_buckets_text(buckets: Dict[str, int]) -> str:
     if not buckets:
         return "N/A"
     return (
-        f"9-10점 {buckets.get('9-10', 0)}개, "
-        f"7-8점 {buckets.get('7-8', 0)}개, "
-        f"5-6점 {buckets.get('5-6', 0)}개, "
-        f"1-4점 {buckets.get('1-4', 0)}개, "
-        f"0점 {buckets.get('0', 0)}개"
+        f"9-10: {buckets.get('9-10', 0)}, "
+        f"7-8: {buckets.get('7-8', 0)}, "
+        f"5-6: {buckets.get('5-6', 0)}, "
+        f"1-4: {buckets.get('1-4', 0)}, "
+        f"0: {buckets.get('0', 0)}"
     )
 
 
 def build_diagnostics_lines(stats: DigestStats) -> List[str]:
     lines = [
         (
-            f"수집 후보: arXiv {stats.arxiv_candidates}건, PubMed {stats.pubmed_candidates}건, "
-            f"SemanticScholar {stats.semantic_scholar_candidates}건, "
-            f"GoogleScholar {stats.google_scholar_candidates}건, "
-            f"총 {stats.total_candidates}건"
+            f"Collected candidates: arXiv {stats.arxiv_candidates}, PubMed {stats.pubmed_candidates}, "
+            f"SemanticScholar {stats.semantic_scholar_candidates}, "
+            f"GoogleScholar {stats.google_scholar_candidates}, "
+            f"total {stats.total_candidates}"
         ),
-        f"시간 필터 통과: {stats.post_time_filter_candidates}건",
-        f"검색 쿼리 전략: {stats.query_strategy}",
-        f"선별 모드: {stats.ranking_mode}",
-        f"발송 주기: {stats.send_frequency}",
-        f"탐색 기간: 최근 {stats.lookback_hours}시간",
+        f"After time filter: {stats.post_time_filter_candidates}",
+        f"Query strategy: {stats.query_strategy}",
+        f"Ranking mode: {stats.ranking_mode}",
+        f"Send cadence: {stats.send_frequency}",
+        f"Lookback window: last {stats.lookback_hours}h",
     ]
     if stats.ranking_threshold > 0:
-        lines.append(f"관련성 임계값: {stats.ranking_threshold:.1f}")
+        lines.append(f"Relevance threshold: {stats.ranking_threshold:.1f}")
     if stats.scoring_candidates > 0:
-        lines.append(f"점수 평가 대상: {stats.scoring_candidates}건")
+        lines.append(f"Scoring candidates: {stats.scoring_candidates}")
     if stats.scored_count > 0:
-        lines.append(f"점수 계산 완료: {stats.scored_count}건")
+        lines.append(f"Scored papers: {stats.scored_count}")
     if stats.score_buckets:
-        lines.append("점수 분포: " + format_score_buckets_text(stats.score_buckets))
-    lines.append(f"임계값 통과: {stats.pass_count}건")
+        lines.append("Score distribution: " + format_score_buckets_text(stats.score_buckets))
+    lines.append(f"Passed threshold: {stats.pass_count}")
     if stats.llm_fallback_reason:
-        lines.append(f"LLM 폴백 정보: {stats.llm_fallback_reason}")
+        lines.append(f"LLM fallback info: {stats.llm_fallback_reason}")
     if stats.zero_candidate_recovery_steps:
-        lines.append("0건 복구 절차:")
+        lines.append("Zero-candidate recovery:")
         for step in stats.zero_candidate_recovery_steps:
             lines.append(f" - {step}")
     if stats.duplicates_filtered > 0:
-        lines.append(f"중복 발송 제외: {stats.duplicates_filtered}건")
+        lines.append(f"Duplicate filtered: {stats.duplicates_filtered}")
     if stats.estimated_llm_calls_upper_bound > 0:
-        lines.append(f"예상 최대 LLM 호출(1회 실행): {stats.estimated_llm_calls_upper_bound}회")
+        lines.append(f"Estimated max LLM calls (one run): {stats.estimated_llm_calls_upper_bound}")
     if stats.llm_max_candidates_effective > 0:
         lines.append(
-            f"LLM 후보 상한: 기본 {stats.llm_max_candidates_base} -> 적용 {stats.llm_max_candidates_effective}"
+            f"LLM candidate cap: base {stats.llm_max_candidates_base} -> effective {stats.llm_max_candidates_effective}"
         )
-    lines.append(f"최종 포함: {stats.final_selected}건")
+    lines.append(f"Final included: {stats.final_selected}")
     return lines
+
+
+def score_badge_colors(score: float) -> Tuple[str, str]:
+    if score >= 9.0:
+        return "#14532d", "#dcfce7"
+    if score >= 7.0:
+        return "#1e3a8a", "#dbeafe"
+    if score >= 5.0:
+        return "#92400e", "#fef3c7"
+    return "#7f1d1d", "#fee2e2"
 
 
 def compose_email_html(
@@ -1904,35 +1922,42 @@ def compose_email_html(
         if len(clean_text(paper.abstract)) > 700:
             snippet += "..."
         keywords = ", ".join((paper.matched_keywords or [])[:10]) or "N/A"
+        score_fg, score_bg = score_badge_colors(paper.score)
 
         llm_block = ""
         if paper.llm_core_point_ko or paper.llm_usefulness_ko or paper.llm_relevance_ko:
             llm_block = (
-                f'<div style="font-size:13px;color:#0b5d1e;margin-top:6px;"><b>LLM relevance reason:</b> {html.escape(paper.llm_relevance_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#0b5d1e;margin-top:4px;"><b>Core point (KR):</b><br/>{escape_multiline(paper.llm_core_point_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#0b5d1e;margin-top:4px;"><b>Why useful for your work (KR):</b><br/>{escape_multiline(paper.llm_usefulness_ko or "N/A")}</div>'
+                f'<div style="font-size:13px;color:#14532d;margin-top:10px;line-height:1.55;"><b>LLM relevance reason:</b> {html.escape(paper.llm_relevance_ko or "N/A")}</div>'
+                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Core point:</b><br/>{escape_multiline(paper.llm_core_point_ko or "N/A")}</div>'
+                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Why useful for your work:</b><br/>{escape_multiline(paper.llm_usefulness_ko or "N/A")}</div>'
             )
 
         sections.append(
             f"""
-        <div style="margin-bottom:20px;padding:14px;border:1px solid #d9d9d9;border-radius:8px;">
-          <div style="font-size:12px;color:#666;">#{idx} | Score {paper.score:.1f}/10 | {html.escape(paper.source)} | {html.escape(paper.topic or "N/A")}</div>
-          <div style="font-size:17px;margin-top:6px;"><a href="{html.escape(paper.url)}">{html.escape(paper.title)}</a></div>
-          <div style="font-size:13px;color:#444;margin-top:5px;"><b>Published:</b> {html.escape(format_local_time(paper.published_at_utc, timezone_name))}</div>
-          <div style="font-size:13px;color:#444;"><b>Authors:</b> {html.escape(format_authors(paper.authors))}</div>
-          <div style="font-size:13px;color:#444;"><b>Matched keywords:</b> {html.escape(keywords)}</div>
+        <div style="margin:0 0 22px;padding:18px 18px 16px;border:1px solid #d1d5db;border-radius:12px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+            <div style="font-size:12px;color:#6b7280;">#{idx} | {html.escape(paper.source)} | {html.escape(paper.topic or "N/A")}</div>
+            <div style="font-size:15px;font-weight:700;color:{score_fg};background:{score_bg};padding:4px 10px;border-radius:999px;border:1px solid rgba(0,0,0,0.08);">Score {paper.score:.1f}/10</div>
+          </div>
+          <div style="font-size:22px;font-weight:700;line-height:1.35;margin:2px 0 12px;">
+            <a href="{html.escape(paper.url)}" style="color:#0f172a;text-decoration:none;">{html.escape(paper.title)}</a>
+          </div>
+          <div style="height:1px;background:#e5e7eb;margin:0 0 10px;"></div>
+          <div style="font-size:13px;color:#334155;margin-top:2px;"><b>Published:</b> {html.escape(format_local_time(paper.published_at_utc, timezone_name))}</div>
+          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Authors:</b> {html.escape(format_authors(paper.authors))}</div>
+          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Matched keywords:</b> {html.escape(keywords)}</div>
           {llm_block}
-          <div style="font-size:13px;color:#333;margin-top:8px;"><b>Abstract snippet:</b> {html.escape(snippet or "No abstract available.")}</div>
+          <div style="font-size:13px;color:#111827;margin-top:10px;line-height:1.6;"><b>Abstract snippet:</b> {html.escape(snippet or "No abstract available.")}</div>
         </div>
         """
         )
 
     return f"""
     <html>
-      <body style="font-family:Arial,sans-serif;max-width:1000px;margin:0 auto;">
-        <h2>Daily Paper Digest</h2>
-        <p><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
-        <p><b>Total sent:</b> {len(papers)}</p>
+      <body style="font-family:Arial,sans-serif;max-width:980px;margin:0 auto;padding:8px 10px;background:#f8fafc;">
+        <h2 style="margin:8px 0 8px;color:#0f172a;">Daily Paper Digest</h2>
+        <p style="margin:0 0 6px;color:#334155;"><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
+        <p style="margin:0 0 16px;color:#334155;"><b>Total sent:</b> {len(papers)}</p>
         {''.join(sections)}
         {diagnostics_html}
       </body>
@@ -1971,10 +1996,10 @@ def compose_email_text(
         if paper.llm_relevance_ko:
             lines.append(f"LLM relevance reason: {paper.llm_relevance_ko}")
         if paper.llm_core_point_ko:
-            lines.append("Core point (KR):")
+            lines.append("Core point:")
             lines.append(paper.llm_core_point_ko)
         if paper.llm_usefulness_ko:
-            lines.append("Why useful for your work (KR):")
+            lines.append("Why useful for your work:")
             lines.append(paper.llm_usefulness_ko)
         abstract = clean_text(paper.abstract)
         if len(abstract) > 500:
@@ -2008,8 +2033,8 @@ def send_email(config: AppConfig, subject: str, html_body: str, text_body: str) 
             )
             if not config.gmail_app_password:
                 raise RuntimeError(
-                    "Google OAuth Gmail 발송에 실패했고 SMTP 앱 비밀번호도 설정되어 있지 않습니다. "
-                    "Google OAuth 연결 상태를 확인하거나 GMAIL_APP_PASSWORD를 설정해 주세요."
+                    "Google OAuth Gmail sending failed and SMTP app password is not configured. "
+                    "Check OAuth connection status or set GMAIL_APP_PASSWORD."
                 ) from exc
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(config.gmail_address, config.gmail_app_password)
@@ -2055,8 +2080,8 @@ def collect_and_rank_papers(
         has_active_query = True
     if not has_active_query:
         raise ValueError(
-            "검색 쿼리가 비어 있습니다. Topic Editor에서 'Keyword / Query 생성'을 실행하거나 "
-            "Topics / Queries 테이블에 arXiv/PubMed/Semantic Scholar/Google Scholar query를 직접 입력 후 Save Topics를 눌러주세요."
+            "Search query is empty. In Topic Editor, run 'Keyword / Query Generation' "
+            "or manually fill arXiv/PubMed/Semantic Scholar/Google Scholar queries, then save topics."
         )
 
     def fetch_from_sources(
@@ -2148,11 +2173,14 @@ def collect_and_rank_papers(
     recovery_steps: List[str] = []
     if not all_papers:
         stats.query_strategy = "saved-topics-zero-hit"
-        recovery_steps.append("초기 검색 결과 0건. 자동 복구 절차를 시작합니다.")
+        recovery_steps.append("Initial search returned zero papers. Starting automatic recovery.")
 
         for attempt in range(1, ZERO_RESULT_RETRY_ATTEMPTS + 1):
             sleep_seconds = ZERO_RESULT_RETRY_SLEEP_SECONDS * attempt
-            recovery_steps.append(f"동일 쿼리 재시도 {attempt}/{ZERO_RESULT_RETRY_ATTEMPTS} (대기 {sleep_seconds:.0f}초)")
+            recovery_steps.append(
+                f"Retry with same queries {attempt}/{ZERO_RESULT_RETRY_ATTEMPTS} "
+                f"(wait {sleep_seconds:.0f}s)"
+            )
             time.sleep(sleep_seconds)
             retry_papers, ra, rp, rs, rg = fetch_from_sources(
                 arxiv_queries,
@@ -2164,9 +2192,9 @@ def collect_and_rank_papers(
                 all_papers = retry_papers
                 apply_source_counts(ra, rp, rs, rg, len(all_papers))
                 stats.query_strategy = f"saved-topics-retry-{attempt}"
-                recovery_steps.append(f"재시도 성공: 총 {len(all_papers)}건")
+                recovery_steps.append(f"Retry succeeded: total {len(all_papers)}")
                 break
-            recovery_steps.append("재시도 결과: 0건")
+            recovery_steps.append("Retry result: 0")
 
     if not all_papers:
         project_terms: List[str] = []
@@ -2194,7 +2222,7 @@ def collect_and_rank_papers(
             else []
         )
         if relaxed_arxiv or relaxed_pubmed or relaxed_semantic or relaxed_google_scholar:
-            recovery_steps.append("쿼리 완화 재검색을 수행합니다.")
+            recovery_steps.append("Running relaxed-query recovery.")
             retry_papers, ra, rp, rs, rg = fetch_from_sources(
                 relaxed_arxiv,
                 relaxed_pubmed,
@@ -2205,15 +2233,15 @@ def collect_and_rank_papers(
                 all_papers = retry_papers
                 apply_source_counts(ra, rp, rs, rg, len(all_papers))
                 stats.query_strategy = "relaxed-query-retry"
-                recovery_steps.append(f"완화 쿼리 성공: 총 {len(all_papers)}건")
+                recovery_steps.append(f"Relaxed-query recovery succeeded: total {len(all_papers)}")
             else:
-                recovery_steps.append("완화 쿼리 결과: 0건")
+                recovery_steps.append("Relaxed-query recovery result: 0")
 
     if not all_papers:
         try:
             rescue_arxiv, rescue_pubmed, rescue_semantic, rescue_google = generate_rescue_queries_with_llm(config)
             if rescue_arxiv or rescue_pubmed or rescue_semantic or rescue_google:
-                recovery_steps.append("LLM 구조 요청 재검색을 수행합니다.")
+                recovery_steps.append("Running LLM-generated rescue queries.")
                 retry_papers, ra, rp, rs, rg = fetch_from_sources(
                     rescue_arxiv,
                     rescue_pubmed,
@@ -2224,13 +2252,13 @@ def collect_and_rank_papers(
                     all_papers = retry_papers
                     apply_source_counts(ra, rp, rs, rg, len(all_papers))
                     stats.query_strategy = "llm-rescue-query"
-                    recovery_steps.append(f"LLM 구조 요청 성공: 총 {len(all_papers)}건")
+                    recovery_steps.append(f"LLM rescue succeeded: total {len(all_papers)}")
                 else:
-                    recovery_steps.append("LLM 구조 요청 결과: 0건")
+                    recovery_steps.append("LLM rescue result: 0")
             else:
-                recovery_steps.append("LLM 구조 요청 쿼리를 생성하지 못했습니다.")
+                recovery_steps.append("LLM did not produce rescue queries.")
         except Exception as exc:
-            recovery_steps.append(f"LLM 구조 요청 실패: {mask_sensitive_text(str(exc))}")
+            recovery_steps.append(f"LLM rescue failed: {mask_sensitive_text(str(exc))}")
 
     if not all_papers and recovery_steps:
         stats.query_strategy = "recovery-failed"
@@ -2287,8 +2315,8 @@ def run_digest(
         should_send_today, next_due_date = evaluate_send_cadence(config, now_utc)
         if not should_send_today:
             skipped_message = (
-                f"SEND_FREQUENCY={config.send_frequency} 정책으로 오늘 발송을 건너뜁니다. "
-                f"다음 발송일: {next_due_date:%Y-%m-%d} ({config.timezone_name})"
+                f"Skipping today's send due to SEND_FREQUENCY={config.send_frequency}. "
+                f"Next due date: {next_due_date:%Y-%m-%d} ({config.timezone_name})"
             )
             logging.info(skipped_message)
             emit_progress(progress_callback, "Skipped by send frequency policy.", 100)
@@ -2392,6 +2420,33 @@ def scale_llm_max_candidates(base_candidates: int, send_interval_days: int) -> i
         return safe_base
     scaled = int(round(safe_base * (float(send_interval_days) ** 0.35)))
     return max(safe_base, min(80, scaled))
+
+
+def normalize_output_language(raw: str) -> str:
+    value = clean_text(raw).lower()
+    if not value:
+        return "en"
+    # Allow simple language tags: en, en-us, ko, ja, es, fr, etc.
+    if re.fullmatch(r"[a-z]{2,8}(-[a-z0-9]{2,8})*", value):
+        return value
+    logging.warning("Invalid OUTPUT_LANGUAGE=%r. Using en.", raw)
+    return "en"
+
+
+def output_language_display_name(code: str) -> str:
+    names = {
+        "en": "English",
+        "ko": "Korean",
+        "ja": "Japanese",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "zh": "Chinese",
+        "zh-cn": "Chinese (Simplified)",
+        "zh-tw": "Chinese (Traditional)",
+    }
+    normalized = normalize_output_language(code)
+    return names.get(normalized, normalized)
 
 
 def compute_internal_schedule_time(
@@ -2527,6 +2582,7 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     }
     send_frequency, send_interval_days = normalize_send_frequency(os.getenv("SEND_FREQUENCY", "daily"))
     send_anchor_date = os.getenv("SEND_ANCHOR_DATE", "2026-01-01").strip() or "2026-01-01"
+    output_language = normalize_output_language(os.getenv("OUTPUT_LANGUAGE", "en"))
     gemini_max_papers = max(1, read_int_env("GEMINI_MAX_PAPERS", 5))
     llm_relevance_threshold = read_float_env("LLM_RELEVANCE_THRESHOLD", 7.0)
     llm_batch_size = max(1, read_int_env("LLM_BATCH_SIZE", 5))
@@ -2635,6 +2691,7 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         send_frequency=send_frequency,
         send_interval_days=send_interval_days,
         send_anchor_date=send_anchor_date,
+        output_language=output_language,
     )
 
 def parse_args() -> argparse.Namespace:

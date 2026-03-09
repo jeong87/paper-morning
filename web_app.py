@@ -49,7 +49,7 @@ def read_app_version() -> str:
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
-    return "0.4.1"
+    return "0.5.0"
 
 
 APP_VERSION = read_app_version()
@@ -114,6 +114,7 @@ EXPECTED_ENV_KEYS = [
     "GEMINI_API_KEY",
     "ENABLE_GEMINI_ADVANCED_REASONING",
     "GEMINI_MODEL",
+    "OUTPUT_LANGUAGE",
     "ENABLE_CEREBRAS_FALLBACK",
     "CEREBRAS_API_KEY",
     "CEREBRAS_MODEL",
@@ -164,6 +165,7 @@ DEFAULT_ENV_VALUES = {
     "GEMINI_API_KEY": "",
     "ENABLE_GEMINI_ADVANCED_REASONING": "true",
     "GEMINI_MODEL": "gemini-3.1-flash",
+    "OUTPUT_LANGUAGE": "en",
     "ENABLE_CEREBRAS_FALLBACK": "true",
     "CEREBRAS_API_KEY": "",
     "CEREBRAS_MODEL": "gpt-oss-120b",
@@ -2482,6 +2484,10 @@ def setup():
             <input type="text" name="GEMINI_MODEL" value="{esc('GEMINI_MODEL')}" />
           </div>
           <div class="settings-row">
+            <div class="settings-label"><strong>요약 출력 언어</strong><small>OUTPUT_LANGUAGE — 예: en, ko, ja, es, fr</small></div>
+            <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" />
+          </div>
+          <div class="settings-row">
             <div class="settings-label"><strong>고급 추론 사용</strong><small>ENABLE_GEMINI_ADVANCED_REASONING — 체크 시 Gemini 3.1 Pro 강제 사용</small></div>
             <input type="checkbox" name="ENABLE_GEMINI_ADVANCED_REASONING" {checked_gemini_advanced} />
           </div>
@@ -3032,6 +3038,13 @@ def settings():
               <small>GEMINI_MODEL — 기본값 gemini-3.1-flash</small>
             </div>
             <input type="text" name="GEMINI_MODEL" value="{esc('GEMINI_MODEL')}" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>요약 출력 언어</strong>
+              <small>OUTPUT_LANGUAGE — 예: en, ko, ja, es, fr</small>
+            </div>
+            <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" style="width:140px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
