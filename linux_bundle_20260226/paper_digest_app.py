@@ -75,6 +75,7 @@ APP_DATA_DIR_ENV_KEY = "PAPER_DIGEST_DATA_DIR"
 SECRET_REF_PREFIX = "keyring://"
 KEYRING_SERVICE_NAME = "paper-morning"
 GOOGLE_OAUTH_BUNDLE_FILENAME = "google_oauth_bundle.json"
+INTERNAL_SCHEDULE_ADVANCE_MINUTES = 13
 
 
 @dataclass
@@ -1932,8 +1933,8 @@ def compose_email_html(
         <h2>Daily Paper Digest</h2>
         <p><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
         <p><b>Total sent:</b> {len(papers)}</p>
-        {diagnostics_html}
         {''.join(sections)}
+        {diagnostics_html}
       </body>
     </html>
     """
@@ -1952,12 +1953,12 @@ def compose_email_text(
         f"Total sent: {len(papers)}",
         "",
     ]
-    if stats:
-        lines.append("[Selection Diagnostics]")
-        lines.extend(build_diagnostics_lines(stats))
-        lines.append("")
     if not papers:
         lines.append("No highly relevant papers found in the last lookback window.")
+        if stats:
+            lines.append("")
+            lines.append("[Selection Diagnostics]")
+            lines.extend(build_diagnostics_lines(stats))
         return "\n".join(lines)
 
     for idx, paper in enumerate(papers, start=1):
@@ -1979,6 +1980,10 @@ def compose_email_text(
         if len(abstract) > 500:
             abstract = abstract[:500] + "..."
         lines.append(f"Abstract: {abstract or 'No abstract available.'}")
+        lines.append("")
+    if stats:
+        lines.append("[Selection Diagnostics]")
+        lines.extend(build_diagnostics_lines(stats))
         lines.append("")
     return "\n".join(lines)
 
@@ -2389,6 +2394,16 @@ def scale_llm_max_candidates(base_candidates: int, send_interval_days: int) -> i
     return max(safe_base, min(80, scaled))
 
 
+def compute_internal_schedule_time(
+    send_hour: int,
+    send_minute: int,
+    advance_minutes: int = INTERNAL_SCHEDULE_ADVANCE_MINUTES,
+) -> Tuple[int, int]:
+    """Return internal trigger time by advancing scheduled send time earlier."""
+    total_minutes = ((send_hour * 60) + send_minute - max(0, advance_minutes)) % (24 * 60)
+    return total_minutes // 60, total_minutes % 60
+
+
 def evaluate_send_cadence(
     config: AppConfig,
     now_utc: datetime,
@@ -2641,20 +2656,26 @@ def parse_args() -> argparse.Namespace:
 
 def start_scheduler(config: AppConfig, dry_run: bool) -> None:
     scheduler = BlockingScheduler(timezone=config.timezone_name)
+    internal_hour, internal_minute = compute_internal_schedule_time(
+        config.send_hour,
+        config.send_minute,
+    )
     scheduler.add_job(
         lambda: run_digest(config, dry_run=dry_run),
         "cron",
-        hour=config.send_hour,
-        minute=config.send_minute,
+        hour=internal_hour,
+        minute=internal_minute,
         id="daily-paper-digest",
         replace_existing=True,
         coalesce=True,
         misfire_grace_time=3600,
     )
     logging.info(
-        "Scheduler started. Trigger time %02d:%02d (%s), SEND_FREQUENCY=%s.",
+        "Scheduler started. User time %02d:%02d -> internal trigger %02d:%02d (%s), SEND_FREQUENCY=%s.",
         config.send_hour,
         config.send_minute,
+        internal_hour,
+        internal_minute,
         config.timezone_name,
         config.send_frequency,
     )

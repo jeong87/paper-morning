@@ -2,6 +2,27 @@
 
 All notable changes to **paper-morning** are documented in this file.
 
+## [0.4.1] - 2026-03-09
+
+### Changed
+- GitHub Actions scheduled trigger updated to reduce top-of-hour delay risk:
+  - `cron: "47 23 * * *"` (KST 08:47, internal 13-minute early trigger for default 09:00 send)
+- Local schedulers now trigger **13 minutes earlier** than user-defined send time:
+  - applies to CLI scheduler (`paper_digest_app.py` non-`--run-once`)
+  - applies to Web Console scheduler refresh path
+- Email content order updated:
+  - paper content appears first
+  - `Selection diagnostics` block moved to the end
+- Repository root cleanup:
+  - moved archival planning/inspection docs into `docs/archive/`
+
+### Docs
+- README improvements:
+  - added clickable links for beginner/full manuals
+  - version text now links to `VERSION`
+  - schedule section updated for internal 13-minute early trigger
+- Manuals updated to reflect the new internal trigger time and archive path changes.
+
 ## [0.4.0] - 2026-03-06
 
 ### Added
@@ -263,7 +284,7 @@ All notable changes to **paper-morning** are documented in this file.
 ## [0.2.0] - 2026-03-01
 
 ### Changed
-- Web Console UI refreshed across Home/Settings/Topic Editor/Manual pages based on `UI_IMPROVEMENT_PLAN.md`.
+- Web Console UI refreshed across Home/Settings/Topic Editor/Manual pages based on `docs/archive/UI_IMPROVEMENT_PLAN.md`.
   - New SaaS-style layout with left sidebar navigation and active page highlighting.
   - Updated visual system (design tokens, cards, badges, button hierarchy, responsive behavior).
 - Home dashboard redesigned:

@@ -23,6 +23,7 @@ from flask import Flask, flash, jsonify, redirect, render_template_string, reque
 from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
     bootstrap_runtime_files,
+    compute_internal_schedule_time,
     enforce_private_file_permissions,
     get_default_data_dir,
     get_log_file_path,
@@ -48,7 +49,7 @@ def read_app_version() -> str:
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
-    return "0.4.0"
+    return "0.4.1"
 
 
 APP_VERSION = read_app_version()
@@ -1085,11 +1086,15 @@ def scheduled_digest_job() -> None:
 def refresh_scheduler() -> str:
     with scheduler_lock:
         config = load_config(require_email_credentials=True)
+        internal_hour, internal_minute = compute_internal_schedule_time(
+            config.send_hour,
+            config.send_minute,
+        )
         scheduler.add_job(
             scheduled_digest_job,
             "cron",
-            hour=config.send_hour,
-            minute=config.send_minute,
+            hour=internal_hour,
+            minute=internal_minute,
             timezone=config.timezone_name,
             id=SCHEDULER_JOB_ID,
             replace_existing=True,
@@ -1099,7 +1104,8 @@ def refresh_scheduler() -> str:
         if not scheduler.running:
             scheduler.start()
         return (
-            f"Scheduler active: trigger {config.send_hour:02d}:{config.send_minute:02d} "
+            f"Scheduler active: user {config.send_hour:02d}:{config.send_minute:02d} "
+            f"-> internal {internal_hour:02d}:{internal_minute:02d} "
             f"({config.timezone_name}), SEND_FREQUENCY={config.send_frequency}"
         )
 
@@ -1339,9 +1345,18 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
         return False, "register_task.ps1 파일을 찾을 수 없습니다."
 
     env_map = read_env_map()
-    send_hour = str(env_map.get("SEND_HOUR", "9")).strip().zfill(2)
-    send_minute = str(env_map.get("SEND_MINUTE", "0")).strip().zfill(2)
-    run_at = f"{send_hour}:{send_minute}"
+    send_hour_raw = str(env_map.get("SEND_HOUR", "9")).strip()
+    send_minute_raw = str(env_map.get("SEND_MINUTE", "0")).strip()
+    try:
+        send_hour = int(send_hour_raw) if send_hour_raw else 9
+    except Exception:
+        send_hour = 9
+    try:
+        send_minute = int(send_minute_raw) if send_minute_raw else 0
+    except Exception:
+        send_minute = 0
+    internal_hour, internal_minute = compute_internal_schedule_time(send_hour, send_minute)
+    run_at = f"{internal_hour:02d}:{internal_minute:02d}"
     project_dir = script_path.parent
     use_exe = (project_dir / "PaperDigest.exe").exists()
 
@@ -1377,7 +1392,11 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
     if completed.returncode != 0:
         message = error or output or "알 수 없는 오류"
         return False, f"등록 실패: {message}"
-    return True, output or "Windows 작업 스케줄러 등록 완료"
+    return (
+        True,
+        (output or "Windows 작업 스케줄러 등록 완료")
+        + f" (user {send_hour:02d}:{send_minute:02d} -> internal {internal_hour:02d}:{internal_minute:02d})",
+    )
 
 
 @app.before_request

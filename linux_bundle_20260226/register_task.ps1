@@ -1,6 +1,6 @@
 param(
     [string]$TaskName = "DailyPaperDigest",
-    [string]$RunAt = "09:00",
+    [string]$RunAt = "08:47",
     [string]$ProjectDir = (Get-Location).Path,
     [string]$PythonExe = "python",
     [switch]$UseExe

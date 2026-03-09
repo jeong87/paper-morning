@@ -2,8 +2,9 @@ name: paper-morning-digest
 
 on:
   schedule:
-    # 09:00 KST = 00:00 UTC
-    - cron: "0 0 * * *"
+    # Default user time 09:00 KST is internally triggered 13 minutes earlier for stability.
+    # 08:47 KST = 23:47 UTC (previous day)
+    - cron: "47 23 * * *"
   workflow_dispatch:
     inputs:
       os_runner:
