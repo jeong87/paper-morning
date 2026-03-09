@@ -37,32 +37,6 @@
   - `weekly`
 - 3일/주간 주기에서는 LLM 후보 상한(`LLM_MAX_CANDIDATES`)을 비선형 확장
 
-## 빠른 시작 (로컬 UI)
-1. 의존성 설치
-
-```bash
-pip install -r requirements.txt
-```
-
-2. 웹 콘솔 실행
-
-```bash
-python web_app.py --host 127.0.0.1 --port 5050
-```
-
-또는
-
-- Windows: `start_web_console.bat`
-- Linux/macOS: `./start_web_console.sh`
-
-3. 브라우저에서 접속
-
-```text
-http://127.0.0.1:5050
-```
-
-4. Setup Wizard / Settings에서 키 입력 후 Topic Editor에서 쿼리 저장
-
 ## GitHub Actions 모드 (권장)
 로컬 PC를 24시간 켜두기 어렵다면 Actions 모드가 가장 편합니다.
 
@@ -115,6 +89,33 @@ http://127.0.0.1:5050
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
+
+## 로컬 설치 방법
+로컬 PC를 24시간 켜두어야 하므로 추천하지 않습니다.
+1. 의존성 설치
+
+```bash
+pip install -r requirements.txt
+```
+
+2. 웹 콘솔 실행
+
+```bash
+python web_app.py --host 127.0.0.1 --port 5050
+```
+
+또는
+
+- Windows: `start_web_console.bat`
+- Linux/macOS: `./start_web_console.sh`
+
+3. 브라우저에서 접속
+
+```text
+http://127.0.0.1:5050
+```
+
+4. Setup Wizard / Settings에서 키 입력 후 Topic Editor에서 쿼리 저장
 
 ## 문제 해결 빠른 체크
 - `검색 쿼리 없음`: Topic Editor에서 쿼리 생성 후 저장했는지 확인
