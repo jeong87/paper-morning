@@ -106,30 +106,38 @@ GOOGLE_SCHOLAR_API_KEY=
 {
   "projects": [
     {
-      "name": "안저영상 기반 뇌졸중 예측",
-      "context": "Fundus image based stroke risk prediction using multimodal deep learning"
+      "name": "의료영상 분할 자동화",
+      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization"
     },
     {
-      "name": "안저영상 기반 CAC score > 0 분류",
-      "context": "Retinal biomarkers to classify CAC score above zero"
+      "name": "임상 텍스트 기반 예후 예측",
+      "context": "Early risk prediction from EHR notes and structured clinical variables"
     },
     {
-      "name": "내시경 동영상 foundation 모델 학습",
-      "context": "Endoscopy video foundation model pretraining and adaptation"
+      "name": "다중모달 진단 보조 모델",
+      "context": "Joint modeling of image and clinical text for diagnosis support"
     },
     {
-      "name": "CCTV 손씻기 탐지",
-      "context": "Hospital infection prevention by hand hygiene detection from CCTV"
+      "name": "의학 논문 QA/RAG 시스템",
+      "context": "Retrieval-augmented question answering over biomedical literature"
     }
   ],
   "topics": [
     {
-      "name": "Fundus + Stroke",
-      "keywords": ["fundus", "retina", "stroke", "deep learning"],
-      "arxiv_query": "(all:fundus OR all:retina) AND (all:stroke) AND (all:deep learning)",
-      "pubmed_query": "(fundus OR retina) AND stroke AND (deep learning)",
-      "semantic_scholar_query": "fundus retina stroke deep learning risk prediction",
-      "google_scholar_query": "fundus retina stroke deep learning risk prediction"
+      "name": "Medical Imaging AI",
+      "keywords": ["medical imaging", "segmentation", "detection", "vision transformer", "deep learning"],
+      "arxiv_query": "(all:\"medical imaging\" OR all:radiology) AND (all:segmentation OR all:detection) AND (all:\"vision transformer\" OR all:\"deep learning\")",
+      "pubmed_query": "(medical imaging OR radiology) AND (segmentation OR detection) AND (deep learning OR transformer)",
+      "semantic_scholar_query": "medical imaging segmentation detection vision transformer deep learning",
+      "google_scholar_query": "medical imaging segmentation detection vision transformer deep learning"
+    },
+    {
+      "name": "Clinical NLP + Prognosis",
+      "keywords": ["EHR", "clinical notes", "risk prediction", "transformer", "multimodal"],
+      "arxiv_query": "(all:\"electronic health record\" OR all:\"clinical notes\") AND (all:\"risk prediction\" OR all:prognosis) AND (all:transformer OR all:multimodal)",
+      "pubmed_query": "(electronic health records OR clinical notes) AND (risk prediction OR prognosis) AND (transformer OR multimodal)",
+      "semantic_scholar_query": "EHR clinical notes risk prediction prognosis transformer multimodal",
+      "google_scholar_query": "EHR clinical notes risk prediction prognosis transformer multimodal"
     }
   ]
 }
@@ -146,12 +154,12 @@ GOOGLE_SCHOLAR_API_KEY=
 {
   "projects": [
     {
-      "name": "안저영상 기반 뇌졸중 예측",
-      "context": "Fundus image based stroke risk prediction using multimodal deep learning"
+      "name": "의료영상 분할 자동화",
+      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization"
     },
     {
-      "name": "CCTV 손씻기 탐지",
-      "context": "Hospital infection prevention by hand hygiene detection from CCTV"
+      "name": "임상 텍스트 기반 예후 예측",
+      "context": "Early risk prediction from EHR notes and structured clinical variables"
     }
   ]
 }

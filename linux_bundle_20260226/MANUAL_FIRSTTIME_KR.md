@@ -117,22 +117,22 @@ LLM 동작 순서(기본):
 {
   "projects": [
     {
-      "name": "안저영상 기반 뇌졸중 예측",
-      "context": "Fundus image based stroke risk prediction using multimodal deep learning"
+      "name": "의료영상 분할 자동화",
+      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization"
     },
     {
-      "name": "안저영상 기반 CAC score > 0 분류",
-      "context": "Retinal biomarkers to classify CAC score above zero"
+      "name": "임상 텍스트 기반 예후 예측",
+      "context": "Early risk prediction from EHR notes and structured clinical variables"
     }
   ],
   "topics": [
     {
-      "name": "Fundus + Stroke",
-      "keywords": ["fundus", "retina", "stroke", "deep learning"],
-      "arxiv_query": "(all:fundus OR all:retina) AND (all:stroke) AND (all:deep learning)",
-      "pubmed_query": "(fundus OR retina) AND stroke AND (deep learning)",
-      "semantic_scholar_query": "fundus retina stroke deep learning risk prediction",
-      "google_scholar_query": "fundus retina stroke deep learning risk prediction"
+      "name": "Medical Imaging AI",
+      "keywords": ["medical imaging", "segmentation", "detection", "vision transformer", "deep learning"],
+      "arxiv_query": "(all:\"medical imaging\" OR all:radiology) AND (all:segmentation OR all:detection) AND (all:\"vision transformer\" OR all:\"deep learning\")",
+      "pubmed_query": "(medical imaging OR radiology) AND (segmentation OR detection) AND (deep learning OR transformer)",
+      "semantic_scholar_query": "medical imaging segmentation detection vision transformer deep learning",
+      "google_scholar_query": "medical imaging segmentation detection vision transformer deep learning"
     }
   ]
 }

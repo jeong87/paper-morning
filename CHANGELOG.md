@@ -22,6 +22,7 @@ All notable changes to **paper-morning** are documented in this file.
   - version text now links to `VERSION`
   - schedule section updated for internal 13-minute early trigger
 - Manuals updated to reflect the new internal trigger time and archive path changes.
+- Replaced `PM_TOPICS_JSON` example content with generic/public-safe research themes.
 
 ## [0.4.0] - 2026-03-06
 
