@@ -1446,7 +1446,9 @@ def verify_local_post_token():
 @app.route("/assets/logo", methods=["GET"])
 def app_logo():
     candidates = [
+        (get_runtime_base_dir() / "assets" / APP_LOGO_FILENAME).resolve(),
         (get_runtime_base_dir() / APP_LOGO_FILENAME).resolve(),
+        (Path("assets") / APP_LOGO_FILENAME).resolve(),
         Path(APP_LOGO_FILENAME).resolve(),
     ]
     for logo_path in candidates:
@@ -3485,11 +3487,17 @@ def topics_generate():
 
 @app.route("/manual", methods=["GET"])
 def manual():
-    manual_path = Path("MANUAL_KR.md")
-    if not manual_path.exists():
+    manual_candidates = [
+        (get_runtime_base_dir() / "docs" / "manuals" / "MANUAL_KR.md").resolve(),
+        (Path("docs") / "manuals" / "MANUAL_KR.md").resolve(),
+        (get_runtime_base_dir() / "MANUAL_KR.md").resolve(),
+        Path("MANUAL_KR.md").resolve(),
+    ]
+    manual_path = next((candidate for candidate in manual_candidates if candidate.exists()), None)
+    if manual_path is None:
         return render_page(
             "Manual",
-            '<div class="card"><h2>Manual</h2><p class="text-danger">MANUAL_KR.md 파일을 찾을 수 없습니다.</p></div>',
+            '<div class="card"><h2>Manual</h2><p class="text-danger">MANUAL_KR.md 파일을 찾을 수 없습니다. (docs/manuals/MANUAL_KR.md)</p></div>',
             active_page="manual",
         )
 

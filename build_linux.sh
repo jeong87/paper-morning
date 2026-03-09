@@ -38,24 +38,24 @@ rm -f dist/.env dist/user_topics.json
 
 echo "Copying support files to dist ..."
 cp -f .env.example dist/.env.example
-cp -f google_oauth_bundle.template.json dist/google_oauth_bundle.template.json
+cp -f templates/google_oauth_bundle.template.json dist/google_oauth_bundle.template.json
 if [ -f "google_oauth_bundle.json" ]; then
   cp -f google_oauth_bundle.json dist/google_oauth_bundle.json
 fi
 cp -f user_topics.template.json dist/user_topics.template.json
-cp -f MANUAL_KR.md dist/MANUAL_KR.md
-cp -f MANUAL_FIRSTTIME_KR.md dist/MANUAL_FIRSTTIME_KR.md
+cp -f docs/manuals/MANUAL_KR.md dist/MANUAL_KR.md
+cp -f docs/manuals/MANUAL_FIRSTTIME_KR.md dist/MANUAL_FIRSTTIME_KR.md
 cp -f README.md dist/README.md
-if [ -f "README_KR.md" ]; then
-  cp -f README_KR.md dist/README_KR.md
+if [ -f "docs/manuals/README_KR.md" ]; then
+  cp -f docs/manuals/README_KR.md dist/README_KR.md
 fi
 cp -f LICENSE dist/LICENSE
 cp -f PRIVACY.md dist/PRIVACY.md
 cp -f VERSION dist/VERSION
 cp -f CHANGELOG.md dist/CHANGELOG.md
 cp -f register_task.ps1 dist/register_task.ps1
-if [ -f "paper-morning-logo.png" ]; then
-  cp -f paper-morning-logo.png dist/paper-morning-logo.png
+if [ -f "assets/paper-morning-logo.png" ]; then
+  cp -f assets/paper-morning-logo.png dist/paper-morning-logo.png
 fi
 
 echo "Build complete."

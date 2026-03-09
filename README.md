@@ -1,6 +1,6 @@
 ﻿# Paper Morning
 
-![Paper Morning Logo](paper-morning-logo.png)
+![Paper Morning Logo](assets/paper-morning-logo.png)
 
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
 It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
@@ -10,8 +10,12 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Live Demo
-- GitHub Pages demo: https://jeong87.github.io/paper-morning/demo/
-- Repository demo file: [docs/demo/index.html](docs/demo/index.html)
+- Demo artifact in repo: [docs/demo/index.html](docs/demo/index.html)
+- GitHub Pages URL format: `https://<github-username>.github.io/<repo-name>/demo/`
+- If you see `404 There isn't a GitHub Pages site here`:
+  1. Open repository `Settings -> Pages` and set source to **GitHub Actions**.
+  2. Run workflow [deploy-demo-pages](.github/workflows/deploy-demo-pages.yml).
+  3. Open the URL shown in the `github-pages` environment deployment.
 
 ## What It Does
 1. Reads your project context and saved search queries.
@@ -105,9 +109,9 @@ Gmail app password docs:
 - https://myaccount.google.com/apppasswords
 
 ## Documentation
-- Beginner (Korean): [MANUAL_FIRSTTIME_KR.md](MANUAL_FIRSTTIME_KR.md)
-- Full operations (Korean): [MANUAL_KR.md](MANUAL_KR.md)
-- Korean README (legacy): [README_KR.md](README_KR.md)
+- Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
+- Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
+- Korean README (legacy): [docs/manuals/README_KR.md](docs/manuals/README_KR.md)
 
 ## Contact
 - nineclas@gmail.com

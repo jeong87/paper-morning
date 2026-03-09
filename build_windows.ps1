@@ -47,24 +47,24 @@ foreach ($path in $cleanupFiles) {
 
 Write-Host "Copying support files to dist ..."
 Copy-Item -Force .env.example dist\.env.example
-Copy-Item -Force google_oauth_bundle.template.json dist\google_oauth_bundle.template.json
+Copy-Item -Force templates\google_oauth_bundle.template.json dist\google_oauth_bundle.template.json
 if (Test-Path "google_oauth_bundle.json") {
     Copy-Item -Force google_oauth_bundle.json dist\google_oauth_bundle.json
 }
 Copy-Item -Force user_topics.template.json dist\user_topics.template.json
-Copy-Item -Force MANUAL_KR.md dist\MANUAL_KR.md
-Copy-Item -Force MANUAL_FIRSTTIME_KR.md dist\MANUAL_FIRSTTIME_KR.md
+Copy-Item -Force docs\manuals\MANUAL_KR.md dist\MANUAL_KR.md
+Copy-Item -Force docs\manuals\MANUAL_FIRSTTIME_KR.md dist\MANUAL_FIRSTTIME_KR.md
 Copy-Item -Force README.md dist\README.md
-if (Test-Path "README_KR.md") {
-    Copy-Item -Force README_KR.md dist\README_KR.md
+if (Test-Path "docs\\manuals\\README_KR.md") {
+    Copy-Item -Force docs\manuals\README_KR.md dist\README_KR.md
 }
 Copy-Item -Force LICENSE dist\LICENSE
 Copy-Item -Force PRIVACY.md dist\PRIVACY.md
 Copy-Item -Force VERSION dist\VERSION
 Copy-Item -Force CHANGELOG.md dist\CHANGELOG.md
 Copy-Item -Force register_task.ps1 dist\register_task.ps1
-if (Test-Path "paper-morning-logo.png") {
-    Copy-Item -Force paper-morning-logo.png dist\paper-morning-logo.png
+if (Test-Path "assets\\paper-morning-logo.png") {
+    Copy-Item -Force assets\paper-morning-logo.png dist\paper-morning-logo.png
 }
 
 Write-Host "Build complete."

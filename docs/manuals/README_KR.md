@@ -1,11 +1,11 @@
 ﻿# Paper Morning
 
-![Paper Morning Logo](paper-morning-logo.png)
+![Paper Morning Logo](../../assets/paper-morning-logo.png)
 
 **Paper Morning**은 의료/AI 연구자를 위한 자동 논문 브리핑 도구입니다.  
 프로젝트 맥락을 넣어두면, 매일(또는 3일/주간) 최신 논문을 모아 관련성 점수 기반으로 선별하고 메일로 전달합니다.
 
-- 최신 기준 버전: **[v0.5.0](VERSION)**
+- 최신 기준 버전: **[v0.5.0](../../VERSION)**
 - 라이선스: `GNU AGPLv3` (`LICENSE`)
 - 개인정보/외부 전송 정책: `PRIVACY.md`
 
@@ -16,8 +16,8 @@
 - GitHub Actions 모드로 PC를 꺼도 자동 발송 가능
 
 ## 처음 사용자라면 여기부터
-- [초보자용 단계별 가이드](MANUAL_FIRSTTIME_KR.md)
-- [운영/고급 설정 포함 전체 매뉴얼](MANUAL_KR.md)
+- [초보자용 단계별 가이드](./MANUAL_FIRSTTIME_KR.md)
+- [운영/고급 설정 포함 전체 매뉴얼](./MANUAL_KR.md)
 
 ## 어떤 흐름으로 동작하나요?
 1. Topic Editor에서 프로젝트와 쿼리를 저장합니다.
@@ -67,8 +67,8 @@ http://127.0.0.1:5050
 로컬 PC를 24시간 켜두기 어렵다면 Actions 모드가 가장 편합니다.
 
 ### 필수 워크플로우
-- 자동 발송: `.github/workflows/paper-morning-digest.yml`
-- 초기 쿼리 자동생성: `.github/workflows/paper-morning-bootstrap-topics.yml`
+- 자동 발송: `../../.github/workflows/paper-morning-digest.yml`
+- 초기 쿼리 자동생성: `../../.github/workflows/paper-morning-bootstrap-topics.yml`
 
 ### 필수 Secret
 - `PM_ENV_FILE` : `.env` 전체 내용
@@ -105,6 +105,8 @@ http://127.0.0.1:5050
 - Google Scholar: 공식 API가 아니라 SerpAPI 연동 방식
 
 ## 배포 파일 만들기
+아래 명령은 **저장소 루트**에서 실행합니다.
+
 ### Windows
 ```powershell
 .\build_windows.ps1

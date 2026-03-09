@@ -6,7 +6,7 @@
 
 현재 문서는 **GitHub Actions 기준 운영 매뉴얼**입니다.
 기존 로컬 실행 중심 매뉴얼은 아래 백업 파일에 보존되어 있습니다.
-- `docs/archive/MANUAL_KR_LOCAL_LEGACY_v033.md`
+- `../archive/MANUAL_KR_LOCAL_LEGACY_v033.md`
 
 처음 설치하는 사용자는 아래 문서를 먼저 보세요.
 - `MANUAL_FIRSTTIME_KR.md` (초보자용 단계별 가이드)

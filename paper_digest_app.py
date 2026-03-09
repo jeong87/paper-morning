@@ -1870,14 +1870,39 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
     return lines
 
 
-def score_badge_colors(score: float) -> Tuple[str, str]:
-    if score >= 9.0:
-        return "#14532d", "#dcfce7"
+def score_badge_colors(score: float) -> Tuple[str, str, str]:
+    if score >= 8.5:
+        return "#166534", "#166534", "#e7f6ec"
     if score >= 7.0:
-        return "#1e3a8a", "#dbeafe"
-    if score >= 5.0:
-        return "#92400e", "#fef3c7"
-    return "#7f1d1d", "#fee2e2"
+        return "#1d4ed8", "#1e3a8a", "#eaf1ff"
+    if score >= 6.0:
+        return "#a16207", "#a16207", "#fef8e7"
+    return "#6b7280", "#4b5563", "#f3f4f6"
+
+
+def source_badge_style(source: str) -> Tuple[str, str, str]:
+    source_key = (source or "").strip().lower()
+    if source_key == "arxiv":
+        return ("arXiv", "#b91c1c", "#fef2f2")
+    if source_key == "pubmed":
+        return ("PubMed", "#1d4e89", "#eff6ff")
+    if source_key in {"semanticscholar", "semantic scholar"}:
+        return ("SemanticScholar", "#1e40af", "#eff6ff")
+    if source_key in {"google scholar", "googlescholar"}:
+        return ("GoogleScholar", "#1d4ed8", "#eef2ff")
+    return (source or "Source", "#374151", "#f3f4f6")
+
+
+def render_score_dots(score: float, dot_color: str) -> str:
+    filled = max(0, min(10, int(round(score))))
+    dots: List[str] = []
+    for idx in range(10):
+        color = dot_color if idx < filled else "#d1d5db"
+        dots.append(
+            f'<span style="display:inline-block;width:7px;height:7px;'
+            f'border-radius:50%;background:{color};margin-right:2px;line-height:7px;">&nbsp;</span>'
+        )
+    return "".join(dots)
 
 
 def compose_email_html(
@@ -1892,74 +1917,244 @@ def compose_email_html(
 
     diagnostics_html = ""
     if stats:
-        diagnostics_items = "".join(
-            f"<li>{html.escape(line)}</li>" for line in build_diagnostics_lines(stats)
+        diagnostics_rows = "".join(
+            (
+                "<tr>"
+                "<td style=\"padding:4px 0;font-size:12px;line-height:1.5;color:#475569;\">"
+                f"- {html.escape(line)}"
+                "</td>"
+                "</tr>"
+            )
+            for line in build_diagnostics_lines(stats)
         )
         diagnostics_html = f"""
-        <div style="margin-top:14px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
-          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">Selection diagnostics</div>
-          <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151;line-height:1.6;">
-            {diagnostics_items}
-          </ul>
-        </div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;">
+          <tr>
+            <td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#0f172a;">
+              Selection diagnostics
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px 14px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                {diagnostics_rows}
+              </table>
+            </td>
+          </tr>
+        </table>
         """
+
+    scanned_count = 0
+    if stats:
+        scanned_count = stats.post_time_filter_candidates or stats.total_candidates
+    if scanned_count <= 0:
+        scanned_count = len(papers)
+    selected_count = len(papers)
+    top_score = max((paper.score for paper in papers), default=0.0)
 
     if not papers:
         return f"""
         <html>
-          <body>
-            <h2>Daily Paper Digest</h2>
-            <p><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
-            <p>No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.</p>
-            {diagnostics_html}
+          <body style="margin:0;padding:0;background:#eef2f7;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:20px 0;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f8fafc;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
+                    <tr>
+                      <td style="padding:22px 26px;background:#1f4632;color:#ffffff;">
+                        <div style="font-size:24px;font-weight:700;line-height:1.3;">Paper Morning</div>
+                        <div style="margin-top:6px;font-size:14px;opacity:0.9;">Your research digest</div>
+                        <div style="margin-top:10px;font-size:12px;opacity:0.9;">Window: {html.escape(since_local)} ~ {html.escape(now_local)}</div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:16px 22px 10px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;">
+                          <tr>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
+                              <div style="font-size:22px;font-weight:700;color:#14532d;">{scanned_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SCANNED</div>
+                            </td>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
+                              <div style="font-size:22px;font-weight:700;color:#14532d;">{selected_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SELECTED</div>
+                            </td>
+                            <td align="center" style="padding:10px 6px;">
+                              <div style="font-size:22px;font-weight:700;color:#14532d;">{top_score:.1f}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">TOP SCORE</div>
+                            </td>
+                          </tr>
+                        </table>
+                        <div style="padding:18px 4px 4px;font-size:14px;color:#334155;">
+                          No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.
+                        </div>
+                        {diagnostics_html}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
           </body>
         </html>
         """
 
     sections = []
     for idx, paper in enumerate(papers, start=1):
-        snippet = clean_text(paper.abstract)[:700]
-        if len(clean_text(paper.abstract)) > 700:
+        full_abstract = clean_text(paper.abstract)
+        snippet = full_abstract[:520]
+        if len(full_abstract) > 520:
             snippet += "..."
-        keywords = ", ".join((paper.matched_keywords or [])[:10]) or "N/A"
-        score_fg, score_bg = score_badge_colors(paper.score)
+        keywords = (paper.matched_keywords or [])[:8]
+        keywords_html = "".join(
+            f'<span style="display:inline-block;padding:3px 8px;margin:0 6px 6px 0;border-radius:4px;'
+            f'background:#f3f4f6;color:#475569;font-size:11px;">{html.escape(keyword)}</span>'
+            for keyword in keywords
+        )
+        if not keywords_html:
+            keywords_html = '<span style="font-size:12px;color:#6b7280;">N/A</span>'
 
-        llm_block = ""
-        if paper.llm_core_point_ko or paper.llm_usefulness_ko or paper.llm_relevance_ko:
-            llm_block = (
-                f'<div style="font-size:13px;color:#14532d;margin-top:10px;line-height:1.55;"><b>LLM relevance reason:</b> {html.escape(paper.llm_relevance_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Core point:</b><br/>{escape_multiline(paper.llm_core_point_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Why useful for your work:</b><br/>{escape_multiline(paper.llm_usefulness_ko or "N/A")}</div>'
-            )
+        score_dot_color, score_fg, score_bg = score_badge_colors(paper.score)
+        score_dots = render_score_dots(paper.score, score_dot_color)
+        source_label, source_fg, source_bg = source_badge_style(paper.source)
+        authors_text = html.escape(format_authors(paper.authors))
+        published_local = html.escape(format_local_time(paper.published_at_utc, timezone_name))
+
+        relevance_text = escape_multiline(paper.llm_relevance_ko or "No LLM relevance reason generated.")
+        core_text = escape_multiline(paper.llm_core_point_ko or "No core-point summary generated.")
+        useful_text = escape_multiline(paper.llm_usefulness_ko or "No usefulness summary generated.")
 
         sections.append(
             f"""
-        <div style="margin:0 0 22px;padding:18px 18px 16px;border:1px solid #d1d5db;border-radius:12px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
-            <div style="font-size:12px;color:#6b7280;">#{idx} | {html.escape(paper.source)} | {html.escape(paper.topic or "N/A")}</div>
-            <div style="font-size:15px;font-weight:700;color:{score_fg};background:{score_bg};padding:4px 10px;border-radius:999px;border:1px solid rgba(0,0,0,0.08);">Score {paper.score:.1f}/10</div>
-          </div>
-          <div style="font-size:22px;font-weight:700;line-height:1.35;margin:2px 0 12px;">
-            <a href="{html.escape(paper.url)}" style="color:#0f172a;text-decoration:none;">{html.escape(paper.title)}</a>
-          </div>
-          <div style="height:1px;background:#e5e7eb;margin:0 0 10px;"></div>
-          <div style="font-size:13px;color:#334155;margin-top:2px;"><b>Published:</b> {html.escape(format_local_time(paper.published_at_utc, timezone_name))}</div>
-          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Authors:</b> {html.escape(format_authors(paper.authors))}</div>
-          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Matched keywords:</b> {html.escape(keywords)}</div>
-          {llm_block}
-          <div style="font-size:13px;color:#111827;margin-top:10px;line-height:1.6;"><b>Abstract snippet:</b> {html.escape(snippet or "No abstract available.")}</div>
-        </div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #d8dee6;border-radius:10px;background:#ffffff;">
+          <tr>
+            <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td valign="middle" style="font-size:12px;color:#6b7280;">
+                    <span style="font-family:monospace;">#{idx}</span>
+                    <span style="display:inline-block;margin-left:8px;padding:4px 10px;border-radius:16px;background:{score_bg};color:{score_fg};font-weight:700;font-size:12px;">
+                      {score_dots} {paper.score:.1f}
+                    </span>
+                  </td>
+                  <td align="right" valign="middle">
+                    <span style="display:inline-block;padding:4px 8px;border-radius:5px;background:{source_bg};color:{source_fg};font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">
+                      {html.escape(source_label)}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:14px 16px 16px;">
+              <div style="font-size:24px;line-height:1.35;font-weight:700;color:#0f172a;">
+                <a href="{html.escape(paper.url)}" style="color:#0f172a;text-decoration:none;">{html.escape(paper.title)}</a>
+              </div>
+              <div style="margin-top:8px;font-size:12px;line-height:1.55;color:#64748b;">
+                {authors_text}<br/>Published {published_local}
+              </div>
+              <div style="margin-top:10px;">{keywords_html}</div>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-left:3px solid #2d5a3d;background:#eaf4ed;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#1f4d34;">Why this matches your work</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#1f2937;">{relevance_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #9a895f;background:#f8f4eb;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#756644;">Key finding</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#374151;">{core_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #4f7fb2;background:#eff5fb;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#355f8f;">How you can use this</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#374151;">{useful_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-top:1px dashed #d1d5db;">
+                <tr>
+                  <td style="padding-top:10px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">
+                    Abstract preview
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top:4px;font-size:12px;line-height:1.65;color:#6b7280;">
+                    {html.escape(snippet or "No abstract available.")}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
         """
         )
 
     return f"""
     <html>
-      <body style="font-family:Arial,sans-serif;max-width:980px;margin:0 auto;padding:8px 10px;background:#f8fafc;">
-        <h2 style="margin:8px 0 8px;color:#0f172a;">Daily Paper Digest</h2>
-        <p style="margin:0 0 6px;color:#334155;"><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
-        <p style="margin:0 0 16px;color:#334155;"><b>Total sent:</b> {len(papers)}</p>
-        {''.join(sections)}
-        {diagnostics_html}
+      <body style="margin:0;padding:0;background:#eef2f7;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:20px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f8fafc;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
+                <tr>
+                  <td style="padding:22px 26px;background:#1f4632;color:#ffffff;">
+                    <div style="font-size:24px;font-weight:700;line-height:1.3;">Paper Morning</div>
+                    <div style="margin-top:6px;font-size:14px;opacity:0.92;">Your research digest</div>
+                    <div style="margin-top:10px;font-size:12px;opacity:0.9;">Window: {html.escape(since_local)} ~ {html.escape(now_local)}</div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:16px 22px 10px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;">
+                      <tr>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
+                          <div style="font-size:22px;font-weight:700;color:#14532d;">{scanned_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SCANNED</div>
+                        </td>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
+                          <div style="font-size:22px;font-weight:700;color:#14532d;">{selected_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SELECTED</div>
+                        </td>
+                        <td align="center" style="padding:10px 6px;">
+                          <div style="font-size:22px;font-weight:700;color:#14532d;">{top_score:.1f}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">TOP SCORE</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:0 22px 4px;">
+                    {''.join(sections)}
+                    {diagnostics_html}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:16px 22px 20px;border-top:1px solid #e5e7eb;background:#ffffff;">
+                    <div style="font-size:11px;line-height:1.6;color:#64748b;text-align:center;">
+                      Generated by Paper Morning · Manage topics in web UI
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
     """
