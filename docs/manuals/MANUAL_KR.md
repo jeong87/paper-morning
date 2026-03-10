@@ -35,7 +35,9 @@
 
 ### 3-1) 저장소 준비
 1. GitHub에 이 프로젝트를 올리거나(또는 fork) 기본 브랜치(`main`)를 준비합니다.
-2. Actions 탭이 활성화되어 있는지 확인합니다.
+2. 상단 `Actions` 탭에서 워크플로우가 활성화되어 있는지 확인합니다.
+3. (Fork 직후 최초 1회) `I understand my workflows, go ahead and enable them` 버튼이 보이면 눌러 활성화합니다.
+4. `.github/workflows/` 아래 워크플로우 파일이 존재하는지 확인합니다.
 
 ### 3-2) Repository Secret 등록
 경로:
@@ -82,7 +84,8 @@ GEMINI_MODEL=gemini-3.1-pro
 ENABLE_GEMINI_ADVANCED_REASONING=true
 LLM_BATCH_SIZE=5
 LLM_MAX_CANDIDATES=30
-LLM_RELEVANCE_THRESHOLD=7
+LLM_RELEVANCE_THRESHOLD=6
+OUTPUT_LANGUAGE=en
 
 # Fallback (optional)
 ENABLE_CEREBRAS_FALLBACK=true
@@ -99,6 +102,8 @@ GOOGLE_SCHOLAR_API_KEY=
 - `GMAIL_APP_PASSWORD`는 Gmail 웹 비밀번호가 아닙니다.
 - 2단계 인증 활성화 후 생성한 16자리 앱 비밀번호를 넣어야 합니다.
 - 발급 링크: `https://myaccount.google.com/apppasswords`
+- 공개 기본값은 `OUTPUT_LANGUAGE=en`입니다.
+- 개인 메일을 한국어로 받고 싶다면 본인 `PM_ENV_FILE`에서 `OUTPUT_LANGUAGE=ko`로 바꾸세요.
 
 #### B) PM_TOPICS_JSON 예시
 

@@ -33,8 +33,9 @@ Main workflow:
 
 ### 3-1) Repository readiness
 1. Fork this repo (recommended) or push it to your own repo.
-2. Ensure Actions is enabled.
-3. Ensure workflow files exist under `.github/workflows/`.
+2. Open the `Actions` tab and ensure workflows are enabled.
+3. (First time after fork) if shown, click `I understand my workflows, go ahead and enable them`.
+4. Ensure workflow files exist under `.github/workflows/`.
 
 ### 3-2) Register repository secrets
 Path:
