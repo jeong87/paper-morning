@@ -2,6 +2,23 @@
 
 All notable changes to **paper-morning** are documented in this file.
 
+## [0.5.1] - 2026-03-10
+
+### Changed
+- Updated the top README logo to `assets/papermorning2.png` and made it clickable to the same email mockup URL used in Live Demo.
+- Updated digest email UI to align with the latest mockup direction:
+  - gradient header with `Window` and `Sources` metadata rows
+  - revised score badge palette and source badge color mapping
+  - refined paper-card typography/spacing and 3-block insight visuals
+  - footer now includes version tag (`Paper Morning v0.5.1`)
+- Updated demo sample content in `scripts/generate_demo_html.py` so generated mockup data reflects the new UI examples.
+
+### Docs
+- Updated visible version labels in README files to `v0.5.1`.
+
+### Version
+- App version bumped to `paper-morning v0.5.1`.
+
 ## [0.5.0] - 2026-03-09
 
 ### Added

@@ -408,6 +408,16 @@ def get_runtime_base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def get_project_root_dir() -> Path:
+    runtime_dir = get_runtime_base_dir()
+    if (runtime_dir / "VERSION").exists():
+        return runtime_dir
+    parent = runtime_dir.parent
+    if (parent / "VERSION").exists():
+        return parent
+    return Path.cwd().resolve()
+
+
 def get_default_data_dir() -> Path:
     override = os.getenv(APP_DATA_DIR_ENV_KEY, "").strip()
     if override:
@@ -481,7 +491,17 @@ def load_google_oauth_bundle_defaults() -> Dict[str, str]:
 
 
 def _legacy_search_dirs() -> List[Path]:
-    candidates = [Path.cwd(), get_runtime_base_dir()]
+    project_root = get_project_root_dir()
+    candidates = [
+        Path.cwd(),
+        get_runtime_base_dir(),
+        project_root,
+        project_root / "config",
+        project_root / "templates",
+        project_root / "docs" / "manuals",
+        project_root / "assets",
+        project_root / "tools",
+    ]
     unique_dirs: List[Path] = []
     seen = set()
     for item in candidates:
@@ -503,6 +523,14 @@ def _find_legacy_file(path_value: str, search_dirs: List[Path]) -> Path | None:
         candidate = (base_dir / direct).resolve()
         if candidate.exists():
             return candidate
+    return None
+
+
+def find_resource_file(path_candidates: List[str], search_dirs: List[Path]) -> Path | None:
+    for candidate in path_candidates:
+        found = _find_legacy_file(candidate, search_dirs)
+        if found:
+            return found
     return None
 
 
@@ -616,7 +644,10 @@ def bootstrap_runtime_files() -> Tuple[Path, Path]:
             logging.info("Migrated .env to persistent path: %s", env_path)
 
     if not env_path.exists():
-        env_example = _find_legacy_file(".env.example", search_dirs)
+        env_example = find_resource_file(
+            [".env.example", "config/.env.example"],
+            search_dirs,
+        )
         if env_example and _copy_if_needed(env_example, env_path):
             logging.info("Bootstrapped .env from .env.example: %s", env_path)
         else:
@@ -638,7 +669,10 @@ def bootstrap_runtime_files() -> Tuple[Path, Path]:
                 logging.info("Migrated default topics file to persistent path: %s", topics_path)
 
     if not topics_path.exists():
-        template = _find_legacy_file("user_topics.template.json", search_dirs)
+        template = find_resource_file(
+            ["user_topics.template.json", "config/user_topics.template.json"],
+            search_dirs,
+        )
         if template and _copy_if_needed(template, topics_path):
             logging.info("Bootstrapped topics file from template: %s", topics_path)
         else:
@@ -1870,14 +1904,37 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
     return lines
 
 
-def score_badge_colors(score: float) -> Tuple[str, str]:
-    if score >= 9.0:
-        return "#14532d", "#dcfce7"
+def score_badge_colors(score: float) -> Tuple[str, str, str]:
+    if score >= 8.0:
+        return "#1a7a3a", "#1a7a3a", "#e6f4eb"
     if score >= 7.0:
-        return "#1e3a8a", "#dbeafe"
-    if score >= 5.0:
-        return "#92400e", "#fef3c7"
-    return "#7f1d1d", "#fee2e2"
+        return "#b8860b", "#8a6b09", "#fef8e8"
+    return "#9a9a9a", "#6b7280", "#f5f5f5"
+
+
+def source_badge_style(source: str) -> Tuple[str, str, str]:
+    source_key = (source or "").strip().lower()
+    if source_key == "arxiv":
+        return ("arXiv", "#b31b1b", "#fef2f2")
+    if source_key == "pubmed":
+        return ("PubMed", "#326599", "#eff5fb")
+    if source_key in {"semanticscholar", "semantic scholar"}:
+        return ("Semantic Scholar", "#1857b6", "#eff4fc")
+    if source_key in {"google scholar", "googlescholar"}:
+        return ("Google Scholar", "#4285f4", "#eef3fe")
+    return (source or "Source", "#374151", "#f3f4f6")
+
+
+def render_score_dots(score: float, dot_color: str) -> str:
+    filled = max(0, min(10, int(round(score))))
+    dots: List[str] = []
+    for idx in range(10):
+        color = dot_color if idx < filled else "#d1d5db"
+        dots.append(
+            f'<span style="display:inline-block;width:6px;height:6px;'
+            f'border-radius:50%;background:{color};margin-right:2px;line-height:6px;">&nbsp;</span>'
+        )
+    return "".join(dots)
 
 
 def compose_email_html(
@@ -1892,74 +1949,264 @@ def compose_email_html(
 
     diagnostics_html = ""
     if stats:
-        diagnostics_items = "".join(
-            f"<li>{html.escape(line)}</li>" for line in build_diagnostics_lines(stats)
+        diagnostics_rows = "".join(
+            (
+                "<tr>"
+                "<td style=\"padding:4px 0;font-size:12px;line-height:1.5;color:#475569;\">"
+                f"- {html.escape(line)}"
+                "</td>"
+                "</tr>"
+            )
+            for line in build_diagnostics_lines(stats)
         )
         diagnostics_html = f"""
-        <div style="margin-top:14px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
-          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">Selection diagnostics</div>
-          <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151;line-height:1.6;">
-            {diagnostics_items}
-          </ul>
-        </div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;">
+          <tr>
+            <td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#0f172a;">
+              Selection diagnostics
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px 14px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                {diagnostics_rows}
+              </table>
+            </td>
+          </tr>
+        </table>
         """
+
+    scanned_count = 0
+    if stats:
+        scanned_count = stats.post_time_filter_candidates or stats.total_candidates
+    if scanned_count <= 0:
+        scanned_count = len(papers)
+    selected_count = len(papers)
+    top_score = max((paper.score for paper in papers), default=0.0)
+    source_labels: List[str] = []
+    for paper in papers:
+        label, _, _ = source_badge_style(paper.source)
+        if label not in source_labels:
+            source_labels.append(label)
+    source_summary = " | ".join(source_labels) if source_labels else "N/A"
+    window_text = f"{since_local} ~ {now_local}"
+    header_html = f"""
+                <tr>
+                  <td style="padding:30px 28px 24px;background:linear-gradient(135deg,#1a2f23 0%,#2d5a3d 60%,#3a7a52 100%);color:#ffffff;">
+                    <div style="font-size:24px;font-weight:700;line-height:1.2;">Paper Morning</div>
+                    <div style="margin-top:6px;font-size:14px;color:#d7e7dd;">Your Daily Paper Digest</div>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Window</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(window_text)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 0 0;white-space:nowrap;">Sources</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0;">{html.escape(source_summary)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+    """
 
     if not papers:
         return f"""
         <html>
-          <body>
-            <h2>Daily Paper Digest</h2>
-            <p><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
-            <p>No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.</p>
-            {diagnostics_html}
+          <body style="margin:0;padding:0;background:#e8e6e1;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8e6e1;padding:24px 0;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;">
+                    {header_html}
+                    <tr>
+                      <td style="padding:16px 22px 10px;background:#ffffff;border-bottom:1px solid #e5e3de;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
+                          <tr>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{scanned_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SCANNED</div>
+                            </td>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{selected_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SELECTED</div>
+                            </td>
+                            <td align="center" style="padding:10px 6px;">
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{top_score:.1f}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">TOP SCORE</div>
+                            </td>
+                          </tr>
+                        </table>
+                        <div style="padding:18px 4px 4px;font-size:14px;color:#5a5a5a;">
+                          No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.
+                        </div>
+                        {diagnostics_html}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
+                        <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
+                          Generated by Paper Morning v0.5.1 | Manage topics in web UI
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
           </body>
         </html>
         """
 
     sections = []
     for idx, paper in enumerate(papers, start=1):
-        snippet = clean_text(paper.abstract)[:700]
-        if len(clean_text(paper.abstract)) > 700:
+        full_abstract = clean_text(paper.abstract)
+        snippet = full_abstract[:520]
+        if len(full_abstract) > 520:
             snippet += "..."
-        keywords = ", ".join((paper.matched_keywords or [])[:10]) or "N/A"
-        score_fg, score_bg = score_badge_colors(paper.score)
+        keywords = (paper.matched_keywords or [])[:8]
+        keywords_html = "".join(
+            f'<span style="display:inline-block;padding:3px 8px;margin:0 6px 6px 0;border-radius:4px;'
+            f'background:#f3f4f6;color:#475569;font-size:11px;">{html.escape(keyword)}</span>'
+            for keyword in keywords
+        )
+        if not keywords_html:
+            keywords_html = '<span style="font-size:12px;color:#6b7280;">N/A</span>'
 
-        llm_block = ""
-        if paper.llm_core_point_ko or paper.llm_usefulness_ko or paper.llm_relevance_ko:
-            llm_block = (
-                f'<div style="font-size:13px;color:#14532d;margin-top:10px;line-height:1.55;"><b>LLM relevance reason:</b> {html.escape(paper.llm_relevance_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Core point:</b><br/>{escape_multiline(paper.llm_core_point_ko or "N/A")}</div>'
-                f'<div style="font-size:13px;color:#14532d;margin-top:8px;line-height:1.55;"><b>Why useful for your work:</b><br/>{escape_multiline(paper.llm_usefulness_ko or "N/A")}</div>'
-            )
+        score_dot_color, score_fg, score_bg = score_badge_colors(paper.score)
+        score_dots = render_score_dots(paper.score, score_dot_color)
+        source_label, source_fg, source_bg = source_badge_style(paper.source)
+        authors_text = html.escape(format_authors(paper.authors))
+        published_local = html.escape(format_local_time(paper.published_at_utc, timezone_name))
+
+        relevance_text = escape_multiline(paper.llm_relevance_ko or "No LLM relevance reason generated.")
+        core_text = escape_multiline(paper.llm_core_point_ko or "No core-point summary generated.")
+        useful_text = escape_multiline(paper.llm_usefulness_ko or "No usefulness summary generated.")
 
         sections.append(
             f"""
-        <div style="margin:0 0 22px;padding:18px 18px 16px;border:1px solid #d1d5db;border-radius:12px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
-            <div style="font-size:12px;color:#6b7280;">#{idx} | {html.escape(paper.source)} | {html.escape(paper.topic or "N/A")}</div>
-            <div style="font-size:15px;font-weight:700;color:{score_fg};background:{score_bg};padding:4px 10px;border-radius:999px;border:1px solid rgba(0,0,0,0.08);">Score {paper.score:.1f}/10</div>
-          </div>
-          <div style="font-size:22px;font-weight:700;line-height:1.35;margin:2px 0 12px;">
-            <a href="{html.escape(paper.url)}" style="color:#0f172a;text-decoration:none;">{html.escape(paper.title)}</a>
-          </div>
-          <div style="height:1px;background:#e5e7eb;margin:0 0 10px;"></div>
-          <div style="font-size:13px;color:#334155;margin-top:2px;"><b>Published:</b> {html.escape(format_local_time(paper.published_at_utc, timezone_name))}</div>
-          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Authors:</b> {html.escape(format_authors(paper.authors))}</div>
-          <div style="font-size:13px;color:#334155;margin-top:3px;"><b>Matched keywords:</b> {html.escape(keywords)}</div>
-          {llm_block}
-          <div style="font-size:13px;color:#111827;margin-top:10px;line-height:1.6;"><b>Abstract snippet:</b> {html.escape(snippet or "No abstract available.")}</div>
-        </div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
+          <tr>
+            <td style="padding:12px 18px;border-bottom:1px solid #e5e3de;background:#fafaf8;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td valign="middle" style="font-size:12px;color:#6b7280;">
+                    <span style="font-family:monospace;">#{idx}</span>
+                    <span style="display:inline-block;margin-left:8px;padding:4px 10px;border-radius:16px;background:{score_bg};color:{score_fg};font-weight:700;font-size:12px;">
+                      {score_dots} {paper.score:.1f}
+                    </span>
+                  </td>
+                  <td align="right" valign="middle">
+                    <span style="display:inline-block;padding:4px 8px;border-radius:5px;background:{source_bg};color:{source_fg};font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">
+                      {html.escape(source_label)}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 18px 18px;">
+              <div style="font-size:19px;line-height:1.4;font-weight:700;color:#1a1a1a;">
+                <a href="{html.escape(paper.url)}" style="color:#1a1a1a;text-decoration:none;">{html.escape(paper.title)}</a>
+              </div>
+              <div style="margin-top:8px;font-size:12px;line-height:1.55;color:#8a8a8a;">
+                {authors_text}<br/>Published {published_local}
+              </div>
+              <div style="margin-top:10px;">{keywords_html}</div>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-left:3px solid #2d5a3d;background:#e8f0eb;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#1f4d34;">Why this matches your work</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{relevance_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #c4b99a;background:#f8f6f2;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#8a7d5a;">Key finding</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{core_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #6a9fd8;background:#f2f6fb;border-radius:7px;">
+                <tr>
+                  <td style="padding:10px 12px;">
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#4a7fb5;">How you can use this</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{useful_text}</div>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-top:1px dashed #e5e3de;">
+                <tr>
+                  <td style="padding-top:10px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">
+                    Abstract preview
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top:4px;font-size:12px;line-height:1.65;color:#8a8a8a;">
+                    {html.escape(snippet or "No abstract available.")}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
         """
         )
 
     return f"""
     <html>
-      <body style="font-family:Arial,sans-serif;max-width:980px;margin:0 auto;padding:8px 10px;background:#f8fafc;">
-        <h2 style="margin:8px 0 8px;color:#0f172a;">Daily Paper Digest</h2>
-        <p style="margin:0 0 6px;color:#334155;"><b>Window:</b> {html.escape(since_local)} ~ {html.escape(now_local)}</p>
-        <p style="margin:0 0 16px;color:#334155;"><b>Total sent:</b> {len(papers)}</p>
-        {''.join(sections)}
-        {diagnostics_html}
+      <body style="margin:0;padding:0;background:#e8e6e1;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8e6e1;padding:24px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;">
+                {header_html}
+
+                <tr>
+                  <td style="padding:16px 22px 10px;background:#ffffff;border-bottom:1px solid #e5e3de;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
+                      <tr>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{scanned_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SCANNED</div>
+                        </td>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{selected_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SELECTED</div>
+                        </td>
+                        <td align="center" style="padding:10px 6px;">
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{top_score:.1f}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">TOP SCORE</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:0 22px 6px;">
+                    {''.join(sections)}
+                    {diagnostics_html}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
+                    <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
+                      Generated by Paper Morning v0.5.1 | Manage topics in web UI
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
     """
@@ -2610,8 +2857,11 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     pubmed_max_ids_per_query = max(1, read_int_env("PUBMED_MAX_IDS_PER_QUERY", 25))
 
     if not user_topics_path.exists():
-        template_path = get_runtime_base_dir() / "user_topics.template.json"
-        if template_path.exists():
+        template_path = find_resource_file(
+            ["user_topics.template.json", "config/user_topics.template.json"],
+            _legacy_search_dirs(),
+        )
+        if template_path and template_path.exists():
             _copy_if_needed(template_path, user_topics_path)
 
     (

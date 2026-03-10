@@ -16,83 +16,78 @@ def build_demo_papers(now_utc: datetime) -> list[Paper]:
     return [
         Paper(
             paper_id="demo-001",
-            title="Multi-Scale Vision Transformer for Robust Medical Image Segmentation",
+            title="Artificial Intelligence for Detecting Fetal Orofacial Clefts and Advancing Medical Education",
             abstract=(
-                "This paper proposes a multi-scale transformer architecture for cross-device "
-                "medical image segmentation with strong domain generalization across centers."
+                "Orofacial clefts are among the most common congenital craniofacial abnormalities, "
+                "yet accurate prenatal detection remains challenging due to the scarcity of "
+                "experienced specialists and the relative rarity of the condition."
             ),
             url="https://example.org/papers/demo-001",
-            authors=["A. Kim", "R. Chen", "M. Patel"],
-            published_at_utc=now_utc - timedelta(hours=6),
+            authors=["Yuanji Zhang", "Yuhao Huang", "Haoran Dou", "et al. (+27)"],
+            published_at_utc=now_utc - timedelta(hours=10),
             source="arXiv",
-            score=9.2,
-            topic="LLM-Relevance",
-            matched_keywords=["medical imaging", "segmentation", "transformer"],
+            score=9.0,
+            topic="Endoscopy FM",
+            matched_keywords=["hospital", "ultrasound", "fetal diagnosis"],
             llm_relevance_ko=(
-                "High relevance: this directly matches robust segmentation under domain shift."
+                "Shares methodological similarities with your endoscopy FM project in medical imaging AI diagnostics and education applications."
             ),
             llm_core_point_ko=(
-                "1) Multi-scale token mixer for fine boundaries.\n"
-                "2) Cross-center training with robust augmentations.\n"
-                "3) Consistent gains on external validation cohorts."
+                "An AI system trained on 45,139 ultrasound images detects fetal orofacial clefts "
+                "with over 93% sensitivity and over 95% specificity."
             ),
             llm_usefulness_ko=(
-                "Useful for improving generalization in real-world hospital data.\n"
-                "Can inform your model architecture and validation protocol."
+                "Reference for improving diagnostic accuracy in your medical imaging deep learning "
+                "models and education-focused deployment."
             ),
         ),
         Paper(
             paper_id="demo-002",
-            title="Clinical Risk Prediction from EHR Notes with Retrieval-Augmented Modeling",
+            title="Multimodal Large Language Models as Image Classifiers",
             abstract=(
-                "A retrieval-augmented framework combines structured EHR variables and free-text "
-                "clinical notes for early prognosis prediction under label sparsity."
+                "Multimodal Large Language Models (MLLM) classification performance depends "
+                "critically on evaluation protocol and ground truth quality."
             ),
             url="https://example.org/papers/demo-002",
-            authors=["J. Smith", "L. Garcia"],
-            published_at_utc=now_utc - timedelta(hours=11),
-            source="PubMed",
-            score=7.8,
-            topic="LLM-Relevance",
-            matched_keywords=["clinical notes", "risk prediction", "multimodal"],
+            authors=["Nikita Kisel", "Illia Volkov", "Klara Janouskova", "Jiri Matas"],
+            published_at_utc=now_utc - timedelta(hours=11, minutes=30),
+            source="arXiv",
+            score=8.0,
+            topic="Endoscopy FM",
+            matched_keywords=["large language model", "image classification", "MLLM"],
             llm_relevance_ko=(
-                "Good relevance: aligned with multimodal prognosis from structured + text signals."
+                "Provides crucial insights into MLLM image classification performance and data quality improvement."
             ),
             llm_core_point_ko=(
-                "1) Retrieval module improves calibration under sparse labels.\n"
-                "2) Better AUROC than note-only and table-only baselines.\n"
-                "3) Includes ablation by note quality and missingness."
+                "MLLM classification performance is highly sensitive to evaluation protocol "
+                "and ground truth quality, explaining conflicting benchmark outcomes."
             ),
             llm_usefulness_ko=(
-                "Applicable when combining tabular and note data in clinical prediction pipelines.\n"
-                "Provides practical guidance for missing-data handling."
+                "Apply to your endoscopy FM evaluation pipeline to strengthen benchmarking methodology."
             ),
         ),
         Paper(
             paper_id="demo-003",
-            title="Efficient Distillation for Biomedical QA over Large Literature Corpora",
+            title="Self-Supervised Pretraining for Endoscopic Video Analysis with Limited Annotations",
             abstract=(
-                "The study introduces a lightweight distillation strategy for retrieval-augmented "
-                "biomedical QA, reducing latency while preserving answer quality."
+                "Endoscopic video analysis remains challenging due to the high cost of obtaining "
+                "expert annotations. This work proposes a temporal self-supervised pretraining framework."
             ),
             url="https://example.org/papers/demo-003",
-            authors=["N. Rossi", "P. Nguyen", "D. Allen"],
-            published_at_utc=now_utc - timedelta(hours=18),
-            source="SemanticScholar",
-            score=6.3,
-            topic="LLM-Relevance",
-            matched_keywords=["RAG", "biomedical QA", "distillation"],
+            authors=["J. Kim", "S. Park", "M. Chen", "et al."],
+            published_at_utc=now_utc - timedelta(hours=16),
+            source="PubMed",
+            score=7.0,
+            topic="Endoscopy FM",
+            matched_keywords=["endoscopy", "self-supervised", "video"],
             llm_relevance_ko=(
-                "Moderate relevance: useful for deployment efficiency and QA system scaling."
+                "Directly addresses self-supervised learning for endoscopic video, overlapping with your FM pretraining research."
             ),
             llm_core_point_ko=(
-                "1) Distilled retriever-reader stack lowers inference cost.\n"
-                "2) Maintains strong accuracy on biomedical QA benchmarks.\n"
-                "3) Includes latency/quality trade-off analysis."
+                "A temporal contrastive learning approach achieves performance comparable to supervised methods while using only 10% labeled data."
             ),
             llm_usefulness_ko=(
-                "Helpful for productionizing literature QA systems with constrained resources.\n"
-                "Can guide deployment optimization decisions."
+                "The pretraining strategy can complement your FM pipeline and reduce annotation costs in endoscopic datasets."
             ),
         ),
     ]
@@ -100,25 +95,25 @@ def build_demo_papers(now_utc: datetime) -> list[Paper]:
 
 def build_demo_stats() -> DigestStats:
     return DigestStats(
-        arxiv_candidates=52,
-        pubmed_candidates=37,
-        semantic_scholar_candidates=28,
-        google_scholar_candidates=19,
-        total_candidates=136,
-        post_time_filter_candidates=64,
+        arxiv_candidates=28,
+        pubmed_candidates=19,
+        semantic_scholar_candidates=0,
+        google_scholar_candidates=0,
+        total_candidates=47,
+        post_time_filter_candidates=47,
         ranking_mode="llm",
         ranking_threshold=6.0,
-        scoring_candidates=30,
-        scored_count=30,
-        pass_count=12,
-        score_buckets={"9-10": 3, "7-8": 5, "5-6": 4, "1-4": 15, "0": 3},
-        estimated_llm_calls_upper_bound=6,
+        scoring_candidates=47,
+        scored_count=47,
+        pass_count=3,
+        score_buckets={"9-10": 1, "7-8": 2, "5-6": 5, "1-4": 33, "0": 6},
+        estimated_llm_calls_upper_bound=10,
         final_selected=3,
         query_strategy="saved-topics",
         send_frequency="daily",
         lookback_hours=24,
-        llm_max_candidates_base=30,
-        llm_max_candidates_effective=30,
+        llm_max_candidates_base=50,
+        llm_max_candidates_effective=50,
     )
 
 

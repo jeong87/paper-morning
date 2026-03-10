@@ -1,11 +1,11 @@
 ﻿# Paper Morning
 
-![Paper Morning Logo](assets/paper-morning-logo.png)
+[![Paper Morning Logo](assets/papermorning2.png)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html)
 
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
 It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
 
-- Latest version: **[v0.5.0](VERSION)**
+- Latest version: **[v0.5.1](VERSION)**
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 

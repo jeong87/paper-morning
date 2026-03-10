@@ -1905,25 +1905,23 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
 
 
 def score_badge_colors(score: float) -> Tuple[str, str, str]:
-    if score >= 8.5:
-        return "#166534", "#166534", "#e7f6ec"
+    if score >= 8.0:
+        return "#1a7a3a", "#1a7a3a", "#e6f4eb"
     if score >= 7.0:
-        return "#1d4ed8", "#1e3a8a", "#eaf1ff"
-    if score >= 6.0:
-        return "#a16207", "#a16207", "#fef8e7"
-    return "#6b7280", "#4b5563", "#f3f4f6"
+        return "#b8860b", "#8a6b09", "#fef8e8"
+    return "#9a9a9a", "#6b7280", "#f5f5f5"
 
 
 def source_badge_style(source: str) -> Tuple[str, str, str]:
     source_key = (source or "").strip().lower()
     if source_key == "arxiv":
-        return ("arXiv", "#b91c1c", "#fef2f2")
+        return ("arXiv", "#b31b1b", "#fef2f2")
     if source_key == "pubmed":
-        return ("PubMed", "#1d4e89", "#eff6ff")
+        return ("PubMed", "#326599", "#eff5fb")
     if source_key in {"semanticscholar", "semantic scholar"}:
-        return ("SemanticScholar", "#1e40af", "#eff6ff")
+        return ("Semantic Scholar", "#1857b6", "#eff4fc")
     if source_key in {"google scholar", "googlescholar"}:
-        return ("GoogleScholar", "#1d4ed8", "#eef2ff")
+        return ("Google Scholar", "#4285f4", "#eef3fe")
     return (source or "Source", "#374151", "#f3f4f6")
 
 
@@ -1933,8 +1931,8 @@ def render_score_dots(score: float, dot_color: str) -> str:
     for idx in range(10):
         color = dot_color if idx < filled else "#d1d5db"
         dots.append(
-            f'<span style="display:inline-block;width:7px;height:7px;'
-            f'border-radius:50%;background:{color};margin-right:2px;line-height:7px;">&nbsp;</span>'
+            f'<span style="display:inline-block;width:6px;height:6px;'
+            f'border-radius:50%;background:{color};margin-right:2px;line-height:6px;">&nbsp;</span>'
         )
     return "".join(dots)
 
@@ -1985,44 +1983,70 @@ def compose_email_html(
         scanned_count = len(papers)
     selected_count = len(papers)
     top_score = max((paper.score for paper in papers), default=0.0)
+    source_labels: List[str] = []
+    for paper in papers:
+        label, _, _ = source_badge_style(paper.source)
+        if label not in source_labels:
+            source_labels.append(label)
+    source_summary = " | ".join(source_labels) if source_labels else "N/A"
+    window_text = f"{since_local} ~ {now_local}"
+    header_html = f"""
+                <tr>
+                  <td style="padding:30px 28px 24px;background:linear-gradient(135deg,#1a2f23 0%,#2d5a3d 60%,#3a7a52 100%);color:#ffffff;">
+                    <div style="font-size:24px;font-weight:700;line-height:1.2;">Paper Morning</div>
+                    <div style="margin-top:6px;font-size:14px;color:#d7e7dd;">Your Daily Paper Digest</div>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Window</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(window_text)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 0 0;white-space:nowrap;">Sources</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0;">{html.escape(source_summary)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+    """
 
     if not papers:
         return f"""
         <html>
-          <body style="margin:0;padding:0;background:#eef2f7;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:20px 0;">
+          <body style="margin:0;padding:0;background:#e8e6e1;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8e6e1;padding:24px 0;">
               <tr>
                 <td align="center">
-                  <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f8fafc;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
+                  <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;">
+                    {header_html}
                     <tr>
-                      <td style="padding:22px 26px;background:#1f4632;color:#ffffff;">
-                        <div style="font-size:24px;font-weight:700;line-height:1.3;">Paper Morning</div>
-                        <div style="margin-top:6px;font-size:14px;opacity:0.9;">Your research digest</div>
-                        <div style="margin-top:10px;font-size:12px;opacity:0.9;">Window: {html.escape(since_local)} ~ {html.escape(now_local)}</div>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:16px 22px 10px;">
-                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;">
+                      <td style="padding:16px 22px 10px;background:#ffffff;border-bottom:1px solid #e5e3de;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
                           <tr>
-                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
-                              <div style="font-size:22px;font-weight:700;color:#14532d;">{scanned_count}</div>
-                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SCANNED</div>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{scanned_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SCANNED</div>
                             </td>
-                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
-                              <div style="font-size:22px;font-weight:700;color:#14532d;">{selected_count}</div>
-                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SELECTED</div>
+                            <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{selected_count}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SELECTED</div>
                             </td>
                             <td align="center" style="padding:10px 6px;">
-                              <div style="font-size:22px;font-weight:700;color:#14532d;">{top_score:.1f}</div>
-                              <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">TOP SCORE</div>
+                              <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{top_score:.1f}</div>
+                              <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">TOP SCORE</div>
                             </td>
                           </tr>
                         </table>
-                        <div style="padding:18px 4px 4px;font-size:14px;color:#334155;">
+                        <div style="padding:18px 4px 4px;font-size:14px;color:#5a5a5a;">
                           No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.
                         </div>
                         {diagnostics_html}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
+                        <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
+                          Generated by Paper Morning v0.5.1 | Manage topics in web UI
+                        </div>
                       </td>
                     </tr>
                   </table>
@@ -2060,9 +2084,9 @@ def compose_email_html(
 
         sections.append(
             f"""
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #d8dee6;border-radius:10px;background:#ffffff;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
           <tr>
-            <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+            <td style="padding:12px 18px;border-bottom:1px solid #e5e3de;background:#fafaf8;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td valign="middle" style="font-size:12px;color:#6b7280;">
@@ -2081,50 +2105,50 @@ def compose_email_html(
             </td>
           </tr>
           <tr>
-            <td style="padding:14px 16px 16px;">
-              <div style="font-size:24px;line-height:1.35;font-weight:700;color:#0f172a;">
-                <a href="{html.escape(paper.url)}" style="color:#0f172a;text-decoration:none;">{html.escape(paper.title)}</a>
+            <td style="padding:16px 18px 18px;">
+              <div style="font-size:19px;line-height:1.4;font-weight:700;color:#1a1a1a;">
+                <a href="{html.escape(paper.url)}" style="color:#1a1a1a;text-decoration:none;">{html.escape(paper.title)}</a>
               </div>
-              <div style="margin-top:8px;font-size:12px;line-height:1.55;color:#64748b;">
+              <div style="margin-top:8px;font-size:12px;line-height:1.55;color:#8a8a8a;">
                 {authors_text}<br/>Published {published_local}
               </div>
               <div style="margin-top:10px;">{keywords_html}</div>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-left:3px solid #2d5a3d;background:#eaf4ed;border-radius:7px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-left:3px solid #2d5a3d;background:#e8f0eb;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
                     <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#1f4d34;">Why this matches your work</div>
-                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#1f2937;">{relevance_text}</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{relevance_text}</div>
                   </td>
                 </tr>
               </table>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #9a895f;background:#f8f4eb;border-radius:7px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #c4b99a;background:#f8f6f2;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
-                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#756644;">Key finding</div>
-                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#374151;">{core_text}</div>
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#8a7d5a;">Key finding</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{core_text}</div>
                   </td>
                 </tr>
               </table>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #4f7fb2;background:#eff5fb;border-radius:7px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #6a9fd8;background:#f2f6fb;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
-                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#355f8f;">How you can use this</div>
-                    <div style="margin-top:4px;font-size:13px;line-height:1.55;color:#374151;">{useful_text}</div>
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#4a7fb5;">How you can use this</div>
+                    <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{useful_text}</div>
                   </td>
                 </tr>
               </table>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-top:1px dashed #d1d5db;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-top:1px dashed #e5e3de;">
                 <tr>
                   <td style="padding-top:10px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">
                     Abstract preview
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding-top:4px;font-size:12px;line-height:1.65;color:#6b7280;">
+                  <td style="padding-top:4px;font-size:12px;line-height:1.65;color:#8a8a8a;">
                     {html.escape(snippet or "No abstract available.")}
                   </td>
                 </tr>
@@ -2137,34 +2161,28 @@ def compose_email_html(
 
     return f"""
     <html>
-      <body style="margin:0;padding:0;background:#eef2f7;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:20px 0;">
+      <body style="margin:0;padding:0;background:#e8e6e1;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8e6e1;padding:24px 0;">
           <tr>
             <td align="center">
-              <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f8fafc;border:1px solid #dbe3ea;border-radius:12px;overflow:hidden;">
-                <tr>
-                  <td style="padding:22px 26px;background:#1f4632;color:#ffffff;">
-                    <div style="font-size:24px;font-weight:700;line-height:1.3;">Paper Morning</div>
-                    <div style="margin-top:6px;font-size:14px;opacity:0.92;">Your research digest</div>
-                    <div style="margin-top:10px;font-size:12px;opacity:0.9;">Window: {html.escape(since_local)} ~ {html.escape(now_local)}</div>
-                  </td>
-                </tr>
+              <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:680px;max-width:680px;background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;">
+                {header_html}
 
                 <tr>
-                  <td style="padding:16px 22px 10px;">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;">
+                  <td style="padding:16px 22px 10px;background:#ffffff;border-bottom:1px solid #e5e3de;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;background:#ffffff;">
                       <tr>
-                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
-                          <div style="font-size:22px;font-weight:700;color:#14532d;">{scanned_count}</div>
-                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SCANNED</div>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{scanned_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SCANNED</div>
                         </td>
-                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e7eb;">
-                          <div style="font-size:22px;font-weight:700;color:#14532d;">{selected_count}</div>
-                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">SELECTED</div>
+                        <td align="center" style="padding:10px 6px;border-right:1px solid #e5e3de;">
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{selected_count}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">SELECTED</div>
                         </td>
                         <td align="center" style="padding:10px 6px;">
-                          <div style="font-size:22px;font-weight:700;color:#14532d;">{top_score:.1f}</div>
-                          <div style="font-size:10px;letter-spacing:1px;color:#6b7280;">TOP SCORE</div>
+                          <div style="font-size:22px;font-weight:700;color:#2d5a3d;">{top_score:.1f}</div>
+                          <div style="font-size:10px;letter-spacing:1px;color:#8a8a8a;">TOP SCORE</div>
                         </td>
                       </tr>
                     </table>
@@ -2172,16 +2190,16 @@ def compose_email_html(
                 </tr>
 
                 <tr>
-                  <td style="padding:0 22px 4px;">
+                  <td style="padding:0 22px 6px;">
                     {''.join(sections)}
                     {diagnostics_html}
                   </td>
                 </tr>
 
                 <tr>
-                  <td style="padding:16px 22px 20px;border-top:1px solid #e5e7eb;background:#ffffff;">
-                    <div style="font-size:11px;line-height:1.6;color:#64748b;text-align:center;">
-                      Generated by Paper Morning · Manage topics in web UI
+                  <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
+                    <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
+                      Generated by Paper Morning v0.5.1 | Manage topics in web UI
                     </div>
                   </td>
                 </tr>
