@@ -10,7 +10,7 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Live Demo
-<a href="https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html" target="_blank" rel="noopener noreferrer">Open Live Demo (new tab)</a>
+<a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html" target="_blank" rel="noopener noreferrer">Open Live Demo (new tab)</a>
 
 ## What It Does
 1. Reads your project context and saved search queries.
