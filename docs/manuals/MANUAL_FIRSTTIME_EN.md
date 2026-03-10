@@ -40,18 +40,33 @@ Link:
 1. Open the Paper Morning repository page and click `Fork`.
 2. Open your forked repository.
 3. Continue all setup and runs from your fork.
-4. Confirm `.github/workflows/` exists in your fork.
+4. **Important:** after forking, workflows can be disabled by default.
+5. Open the `Actions` tab in your fork:
+   - (first time only) click `I understand my workflows, go ahead and enable them`.
+6. Confirm workflow names are visible in the left panel:
+   - `paper-morning-bootstrap-topics`
+   - `paper-morning-digest`
+7. Confirm `.github/workflows/` exists in your fork.
 
 ## 5) Register required secrets
 Path:
 - `Repository > Settings > Secrets and variables > Actions > New repository secret`
 
-Required secrets:
+Beginner clarification:
+- You do **not** create many secrets for each env key.
+- You only create **two** secrets.
+- `PM_ENV_FILE` value = one full `.env-style` text block.
+- `PM_TOPICS_JSON` value = one full JSON text block.
+
+Required secret names:
 1. `PM_ENV_FILE`
 2. `PM_TOPICS_JSON`
 
 ### 5-1) Example `PM_ENV_FILE`
-Paste and replace values with yours.
+1. Click `New repository secret`
+2. Name: `PM_ENV_FILE`
+3. Secret (Value): paste the **entire block** below
+4. Replace with your own values and save
 
 ```env
 GMAIL_ADDRESS=your_sender@gmail.com
@@ -92,12 +107,17 @@ SEMANTIC_SCHOLAR_API_KEY=
 GOOGLE_SCHOLAR_API_KEY=
 ```
 
-Tip:
-- Public default is `OUTPUT_LANGUAGE=en`.
-- For personal Korean digests, set `OUTPUT_LANGUAGE=ko` in your own `PM_ENV_FILE`.
+Where to place keys from Sections 2 and 3:
+- Gmail app password from Section 2 -> `GMAIL_APP_PASSWORD=...` (no spaces)
+- Gemini API key from Section 3 -> `GEMINI_API_KEY=...`
+- If you want personal Korean digests -> set `OUTPUT_LANGUAGE=ko`
+- For public default/example -> keep `OUTPUT_LANGUAGE=en`
 
 ### 5-2) Example `PM_TOPICS_JSON`
-Start with this and adjust later.
+1. Click `New repository secret`
+2. Name: `PM_TOPICS_JSON`
+3. Secret (Value): paste the **entire JSON** below
+4. Edit only project/topic content and save
 
 ```json
 {
@@ -124,10 +144,30 @@ Start with this and adjust later.
 }
 ```
 
+JSON warning:
+- Keep JSON syntax valid when editing (`"`, `,`, `{}`, `[]`).
+- If syntax breaks, you will see `PM_TOPICS_JSON is not valid JSON`.
+
 ## 6) First run in 3 steps
-1. Run `paper-morning-bootstrap-topics` once.
-2. Run `paper-morning-digest` once with `dry_run`.
-3. Run `paper-morning-digest` once with `send_now`.
+Use the GitHub UI steps below (no code edit needed):
+
+1. Open the `Actions` tab.
+2. (First time only) click `I understand my workflows, go ahead and enable them`.
+3. Select `paper-morning-bootstrap-topics` from the left panel.
+4. Click `Run workflow` on the right.
+5. Keep branch as `main`, choose options if needed, then click `Run workflow`.
+6. Select `paper-morning-digest`.
+7. Click `Run workflow`.
+8. In Inputs:
+   - set `Run mode` to `dry_run`
+   - choose `Runner OS`
+   - click `Run workflow`
+9. Run it once more with:
+   - `Run mode` = `send_now`
+
+Note:
+- `dry_run` / `send_now` are workflow input options.
+- You do not edit source code or workflow yaml for this test.
 
 Success criteria:
 1. `dry_run` completes without errors.
@@ -137,6 +177,7 @@ Success criteria:
 No extra button is required.
 The workflow already includes a daily schedule trigger.
 You should receive the next day digest automatically if secrets are valid.
+If Actions is still disabled in your fork, daily automation will not run.
 
 ## 8) Quick troubleshooting
 1. `Missing required env vars for email`

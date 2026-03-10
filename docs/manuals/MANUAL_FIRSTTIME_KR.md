@@ -40,6 +40,10 @@
 1. 원본 Paper Morning 저장소 페이지에서 `Fork`를 누릅니다.
 2. 내 계정으로 복사된 저장소(내 fork)를 엽니다.
 3. 이후 설정/실행은 내 fork 저장소에서 진행하면 됩니다.
+4. **중요:** Fork 직후에는 Actions가 비활성화될 수 있습니다.
+5. 내 fork의 상단 `Actions` 탭으로 들어가서:
+   - (최초 1회) `I understand my workflows, go ahead and enable them` 버튼을 눌러 활성화합니다.
+6. 좌측 목록에 `paper-morning-bootstrap-topics`, `paper-morning-digest`가 보이면 정상입니다.
 
 선택:
 - 직접 새 저장소에 올리고 싶다면 아래 명령으로 진행해도 됩니다.
@@ -53,18 +57,26 @@ git remote add origin https://github.com/<내계정>/<내레포>.git
 git push -u origin main
 ```
 
-4. GitHub 웹에서 `.github/workflows/` 폴더가 보이면 정상입니다.
+7. GitHub 웹에서 `.github/workflows/` 폴더가 보이면 정상입니다.
 
 ## 5. Secrets 2개 등록 (핵심)
 경로:
 `Repository > Settings > Secrets and variables > Actions > New repository secret`
 
-반드시 등록할 Secret:
+초보자 핵심:
+- Secret은 여러 개를 만드는 게 아니라, **아래 2개만** 만들면 됩니다.
+- `PM_ENV_FILE`의 Value에는 `.env 형식 텍스트 전체`를 한 번에 넣습니다.
+- `PM_TOPICS_JSON`의 Value에는 `JSON 텍스트 전체`를 한 번에 넣습니다.
+
+반드시 등록할 Secret 이름:
 1. `PM_ENV_FILE`
 2. `PM_TOPICS_JSON`
 
 ### 5-1) PM_ENV_FILE 값 예시
-아래를 그대로 붙여넣고, 내 값으로 바꿔 저장하세요.
+1. `New repository secret` 클릭
+2. Name 칸: `PM_ENV_FILE`
+3. Secret(Value) 칸: 아래 텍스트 **전체**를 복사해서 붙여넣기
+4. 내 정보로 수정 후 저장
 
 ```env
 GMAIL_ADDRESS=your_sender@gmail.com
@@ -94,6 +106,7 @@ ENABLE_GEMINI_ADVANCED_REASONING=true
 LLM_BATCH_SIZE=5
 LLM_MAX_CANDIDATES=30
 LLM_RELEVANCE_THRESHOLD=6
+OUTPUT_LANGUAGE=en
 
 ENABLE_CEREBRAS_FALLBACK=true
 CEREBRAS_API_KEY=
@@ -104,6 +117,12 @@ SEMANTIC_SCHOLAR_API_KEY=
 GOOGLE_SCHOLAR_API_KEY=
 ```
 
+위 2,3단계에서 발급받은 값 넣는 위치:
+- 2단계에서 만든 Gmail App Password -> `GMAIL_APP_PASSWORD=` 뒤에 공백 없이 입력
+- 3단계에서 만든 Gemini API Key -> `GEMINI_API_KEY=` 뒤에 입력
+- 개인 메일을 한국어로 받고 싶다면 -> `OUTPUT_LANGUAGE=ko` 로 변경
+- 공개 기본값/예시는 영어 유지 시 -> `OUTPUT_LANGUAGE=en`
+
 LLM 동작 순서(기본):
 1. `ENABLE_GEMINI_ADVANCED_REASONING=true`면 기본 모델은 `gemini-3.1-pro`
 2. `gemini-3.1-pro` 실패 시 `gemini-3.1-flash` 재시도
@@ -111,7 +130,10 @@ LLM 동작 순서(기본):
 4. Gemini 전체 실패 + Cerebras 키가 있으면 `gpt-oss-120b`로 폴백
 
 ### 5-2) PM_TOPICS_JSON 값 예시
-아래를 그대로 붙여넣고 시작해도 됩니다.
+1. `New repository secret` 클릭
+2. Name 칸: `PM_TOPICS_JSON`
+3. Secret(Value) 칸: 아래 JSON **전체**를 복사해서 붙여넣기
+4. 프로젝트/키워드만 수정하고 저장
 
 ```json
 {
@@ -140,11 +162,29 @@ LLM 동작 순서(기본):
 
 주의:
 - `topics`가 빈 배열이면 검색 쿼리가 없어서 실패합니다.
+- JSON 수정 시 큰따옴표(`"`), 쉼표(`,`), 중괄호(`{}`), 대괄호(`[]`) 형식이 깨지지 않게 주의하세요.
+- 형식이 깨지면 `PM_TOPICS_JSON is not valid JSON` 오류가 납니다.
 
 ## 6. 처음 실행 3단계
-1. `Actions` 탭에서 `paper-morning-bootstrap-topics` 1회 실행
-2. `Actions` 탭에서 `paper-morning-digest`를 `dry_run`으로 1회 실행
-3. 같은 워크플로우를 `send_now`로 1회 실행
+아래는 **GitHub 웹 UI에서 수동 실행하는 정확한 방법**입니다.
+
+1. 상단 `Actions` 탭 클릭
+2. (최초 1회라면) `I understand my workflows, go ahead and enable them` 클릭
+3. 좌측 목록에서 `paper-morning-bootstrap-topics` 선택
+4. 우측 `Run workflow` 클릭
+5. `Use workflow from`는 `main` 유지, 필요하면 러너 옵션 선택 후 `Run workflow` 버튼으로 실행
+6. 완료 후 좌측에서 `paper-morning-digest` 선택
+7. `Run workflow` 클릭
+8. 입력 옵션(Input)에서:
+   - `Run mode`를 `dry_run`으로 선택
+   - `Runner OS`를 선택
+   - 다시 `Run workflow` 클릭
+9. 같은 방식으로 한 번 더 실행하되:
+   - `Run mode`를 `send_now`로 선택 후 실행
+
+주의:
+- `dry_run`, `send_now`는 코드 수정이 아니라 **Run workflow 입력 옵션**입니다.
+- `.yml` 파일을 직접 고칠 필요 없습니다.
 
 성공 기준:
 1. dry_run에서 에러 없이 완료
@@ -154,6 +194,7 @@ LLM 동작 순서(기본):
 1. 별도 버튼을 켜둘 필요 없습니다.
 2. 기본 워크플로우에 이미 매일 08:47 KST(= 09:00 기준 내부 13분 선행) 스케줄이 들어 있습니다.
 3. 다음 날 아침 메일이 오면 정상입니다.
+4. 단, Actions가 Disable 상태면 자동 실행이 안 되므로 `Actions` 탭에서 활성화 상태를 확인하세요.
 
 ## 8. 자주 막히는 지점과 바로 해결법
 1. `Missing required env vars for email: GMAIL_ADDRESS`
