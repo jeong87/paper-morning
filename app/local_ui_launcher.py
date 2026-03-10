@@ -66,7 +66,8 @@ def switch_workdir_to_executable_dir() -> None:
     if getattr(sys, "frozen", False):
         base_dir = Path(sys.executable).resolve().parent
     else:
-        base_dir = Path(__file__).resolve().parent
+        # Source-tree run: use repository root, not app/ subdir.
+        base_dir = Path(__file__).resolve().parent.parent
     os.chdir(base_dir)
 
 

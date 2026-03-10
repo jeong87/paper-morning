@@ -41,19 +41,19 @@
 1. 의존성 설치
 
 ```bash
-pip install -r requirements.txt
+pip install -r deps/requirements.txt
 ```
 
 2. 웹 콘솔 실행
 
 ```bash
-python web_app.py --host 127.0.0.1 --port 5050
+python app/web_app.py --host 127.0.0.1 --port 5050
 ```
 
 또는
 
-- Windows: `start_web_console.bat`
-- Linux/macOS: `./start_web_console.sh`
+- Windows: `tools/start_web_console.bat`
+- Linux/macOS: `./tools/start_web_console.sh`
 
 3. 브라우저에서 접속
 
@@ -109,13 +109,13 @@ http://127.0.0.1:5050
 
 ### Windows
 ```powershell
-.\build_windows.ps1
+.\tools\build_windows.ps1
 ```
 
 ### Linux
 ```bash
-chmod +x build_linux.sh
-./build_linux.sh
+chmod +x tools/build_linux.sh
+./tools/build_linux.sh
 ```
 
 ## 문제 해결 빠른 체크

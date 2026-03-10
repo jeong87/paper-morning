@@ -408,6 +408,16 @@ def get_runtime_base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def get_project_root_dir() -> Path:
+    runtime_dir = get_runtime_base_dir()
+    if (runtime_dir / "VERSION").exists():
+        return runtime_dir
+    parent = runtime_dir.parent
+    if (parent / "VERSION").exists():
+        return parent
+    return Path.cwd().resolve()
+
+
 def get_default_data_dir() -> Path:
     override = os.getenv(APP_DATA_DIR_ENV_KEY, "").strip()
     if override:
@@ -481,7 +491,17 @@ def load_google_oauth_bundle_defaults() -> Dict[str, str]:
 
 
 def _legacy_search_dirs() -> List[Path]:
-    candidates = [Path.cwd(), get_runtime_base_dir()]
+    project_root = get_project_root_dir()
+    candidates = [
+        Path.cwd(),
+        get_runtime_base_dir(),
+        project_root,
+        project_root / "config",
+        project_root / "templates",
+        project_root / "docs" / "manuals",
+        project_root / "assets",
+        project_root / "tools",
+    ]
     unique_dirs: List[Path] = []
     seen = set()
     for item in candidates:
@@ -503,6 +523,14 @@ def _find_legacy_file(path_value: str, search_dirs: List[Path]) -> Path | None:
         candidate = (base_dir / direct).resolve()
         if candidate.exists():
             return candidate
+    return None
+
+
+def find_resource_file(path_candidates: List[str], search_dirs: List[Path]) -> Path | None:
+    for candidate in path_candidates:
+        found = _find_legacy_file(candidate, search_dirs)
+        if found:
+            return found
     return None
 
 
@@ -616,7 +644,10 @@ def bootstrap_runtime_files() -> Tuple[Path, Path]:
             logging.info("Migrated .env to persistent path: %s", env_path)
 
     if not env_path.exists():
-        env_example = _find_legacy_file(".env.example", search_dirs)
+        env_example = find_resource_file(
+            [".env.example", "config/.env.example"],
+            search_dirs,
+        )
         if env_example and _copy_if_needed(env_example, env_path):
             logging.info("Bootstrapped .env from .env.example: %s", env_path)
         else:
@@ -638,7 +669,10 @@ def bootstrap_runtime_files() -> Tuple[Path, Path]:
                 logging.info("Migrated default topics file to persistent path: %s", topics_path)
 
     if not topics_path.exists():
-        template = _find_legacy_file("user_topics.template.json", search_dirs)
+        template = find_resource_file(
+            ["user_topics.template.json", "config/user_topics.template.json"],
+            search_dirs,
+        )
         if template and _copy_if_needed(template, topics_path):
             logging.info("Bootstrapped topics file from template: %s", topics_path)
         else:
@@ -2805,8 +2839,11 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     pubmed_max_ids_per_query = max(1, read_int_env("PUBMED_MAX_IDS_PER_QUERY", 25))
 
     if not user_topics_path.exists():
-        template_path = get_runtime_base_dir() / "user_topics.template.json"
-        if template_path.exists():
+        template_path = find_resource_file(
+            ["user_topics.template.json", "config/user_topics.template.json"],
+            _legacy_search_dirs(),
+        )
+        if template_path and template_path.exists():
             _copy_if_needed(template_path, user_topics_path)
 
     (

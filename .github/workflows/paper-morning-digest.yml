@@ -56,7 +56,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && pip install -r deps/requirements.txt
 
       - name: Prepare runtime files from secrets
         env:
@@ -65,7 +65,7 @@ jobs:
         run: python scripts/gha_prepare_runtime.py
 
       - name: Run digest (scheduled send_now)
-        run: python paper_digest_app.py --run-once
+        run: python app/paper_digest_app.py --run-once
 
       - name: Upload runtime logs
         if: always()
@@ -94,7 +94,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && pip install -r deps/requirements.txt
 
       - name: Prepare runtime files from secrets
         env:
@@ -104,11 +104,11 @@ jobs:
 
       - name: Run digest (manual send_now)
         if: inputs.run_mode == 'send_now'
-        run: python paper_digest_app.py --run-once
+        run: python app/paper_digest_app.py --run-once
 
       - name: Run digest (manual dry_run)
         if: inputs.run_mode == 'dry_run'
-        run: python paper_digest_app.py --run-once --dry-run
+        run: python app/paper_digest_app.py --run-once --dry-run
 
       - name: Upload runtime logs
         if: always()

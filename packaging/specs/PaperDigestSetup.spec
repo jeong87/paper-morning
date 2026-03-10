@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['onboarding_wizard.py'],
+    ['app/onboarding_wizard.py'],
     pathex=[],
     binaries=[],
     datas=[],

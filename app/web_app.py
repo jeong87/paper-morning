@@ -42,10 +42,14 @@ from paper_digest_app import (
 
 
 def read_app_version() -> str:
-    version_path = get_runtime_base_dir() / "VERSION"
-    if not version_path.exists():
-        version_path = Path("VERSION")
-    if version_path.exists():
+    candidates = [
+        (get_runtime_base_dir() / "VERSION").resolve(),
+        (get_runtime_base_dir().parent / "VERSION").resolve(),
+        Path("VERSION").resolve(),
+    ]
+    for version_path in candidates:
+        if not version_path.exists():
+            continue
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
@@ -1023,9 +1027,16 @@ def mark_send_now_executed() -> None:
 
 def read_env_map() -> Dict[str, str]:
     env_path = resolve_env_path()
-    env_example_path = get_runtime_base_dir() / ".env.example"
     merged = dict(DEFAULT_ENV_VALUES)
-    if env_example_path.exists():
+    env_example_candidates = [
+        (resolve_env_path().parent / ".env.example").resolve(),
+        (get_runtime_base_dir() / ".env.example").resolve(),
+        (get_runtime_base_dir().parent / "config" / ".env.example").resolve(),
+        (Path("config") / ".env.example").resolve(),
+        Path(".env.example").resolve(),
+    ]
+    env_example_path = next((path for path in env_example_candidates if path.exists()), None)
+    if env_example_path:
         merged.update({k: v or "" for k, v in dotenv_values(str(env_example_path)).items()})
     if env_path.exists():
         merged.update({k: v or "" for k, v in dotenv_values(str(env_path)).items()})
@@ -1339,8 +1350,11 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
         return False, "Windows에서만 지원됩니다."
 
     candidates = [
+        get_runtime_base_dir() / "tools" / "register_task.ps1",
+        get_runtime_base_dir().parent / "tools" / "register_task.ps1",
         get_runtime_base_dir() / "register_task.ps1",
         Path(__file__).resolve().parent / "register_task.ps1",
+        Path("tools/register_task.ps1").resolve(),
     ]
     script_path = next((path for path in candidates if path.exists()), None)
     if not script_path:
@@ -1360,6 +1374,8 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
     internal_hour, internal_minute = compute_internal_schedule_time(send_hour, send_minute)
     run_at = f"{internal_hour:02d}:{internal_minute:02d}"
     project_dir = script_path.parent
+    if project_dir.name.lower() == "tools":
+        project_dir = project_dir.parent
     use_exe = (project_dir / "PaperDigest.exe").exists()
 
     command = [
@@ -1446,8 +1462,10 @@ def verify_local_post_token():
 @app.route("/assets/logo", methods=["GET"])
 def app_logo():
     candidates = [
+        (get_runtime_base_dir().parent / "assets" / APP_LOGO_FILENAME).resolve(),
         (get_runtime_base_dir() / "assets" / APP_LOGO_FILENAME).resolve(),
         (get_runtime_base_dir() / APP_LOGO_FILENAME).resolve(),
+        (Path("..") / "assets" / APP_LOGO_FILENAME).resolve(),
         (Path("assets") / APP_LOGO_FILENAME).resolve(),
         Path(APP_LOGO_FILENAME).resolve(),
     ]
@@ -1509,8 +1527,15 @@ def read_topics_payload(path: Path) -> Dict[str, Any]:
     if path.exists():
         text = path.read_text(encoding="utf-8-sig")
         return normalize_topics_payload(json.loads(text))
-    template_path = get_runtime_base_dir() / "user_topics.template.json"
-    if template_path.exists():
+    template_candidates = [
+        (get_runtime_base_dir() / "user_topics.template.json").resolve(),
+        (get_runtime_base_dir() / "config" / "user_topics.template.json").resolve(),
+        (get_runtime_base_dir().parent / "config" / "user_topics.template.json").resolve(),
+        (Path("config") / "user_topics.template.json").resolve(),
+        Path("user_topics.template.json").resolve(),
+    ]
+    template_path = next((candidate for candidate in template_candidates if candidate.exists()), None)
+    if template_path is not None:
         text = template_path.read_text(encoding="utf-8-sig")
         return normalize_topics_payload(json.loads(text))
     return {"projects": [], "topics": []}

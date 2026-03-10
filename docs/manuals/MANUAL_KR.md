@@ -25,7 +25,7 @@
 ## 2) 동작 구조
 1. GitHub Actions가 스케줄 또는 수동 트리거로 실행됩니다.
 2. Repository Secret에 저장된 설정(`PM_ENV_FILE`)과 주제/쿼리(`PM_TOPICS_JSON`)를 런타임 파일로 복원합니다.
-3. `paper_digest_app.py --run-once`를 실행합니다.
+3. `app/paper_digest_app.py --run-once`를 실행합니다.
 4. 결과 로그는 Actions 실행 로그 + Artifact로 확인합니다.
 
 워크플로우 파일:

@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from paper_digest_app import DigestStats, Paper, compose_email_html
+from app.paper_digest_app import DigestStats, Paper, compose_email_html
 
 
 def build_demo_papers(now_utc: datetime) -> list[Paper]:

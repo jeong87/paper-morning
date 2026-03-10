@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['local_ui_launcher.py'],
+    ['app/local_ui_launcher.py'],
     pathex=[],
     binaries=[],
     datas=[],

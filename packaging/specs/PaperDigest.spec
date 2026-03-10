@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['paper_digest_app.py'],
+    ['app/paper_digest_app.py'],
     pathex=[],
     binaries=[],
     datas=[],

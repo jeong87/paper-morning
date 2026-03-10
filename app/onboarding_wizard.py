@@ -454,9 +454,9 @@ def main() -> int:
             "or enter queries manually before Send Now."
         )
     print("Next steps:")
-    print("1) python paper_digest_app.py --run-once --dry-run")
-    print("2) python paper_digest_app.py --run-once")
-    print("3) python paper_digest_app.py  (always-on scheduler mode)")
+    print("1) python app/paper_digest_app.py --run-once --dry-run")
+    print("2) python app/paper_digest_app.py --run-once")
+    print("3) python app/paper_digest_app.py  (always-on scheduler mode)")
     return 0
 
 

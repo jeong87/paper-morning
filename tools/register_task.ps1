@@ -15,7 +15,7 @@ if ($UseExe) {
     }
     $action = New-ScheduledTaskAction -Execute $exePath -Argument "--run-once" -WorkingDirectory $ProjectDir
 } else {
-    $scriptPath = Join-Path $ProjectDir "paper_digest_app.py"
+    $scriptPath = Join-Path $ProjectDir "app\paper_digest_app.py"
     if (-not (Test-Path $scriptPath)) {
         throw "Script not found: $scriptPath"
     }

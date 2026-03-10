@@ -12,7 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from paper_digest_app import CEREBRAS_API_BASE_DEFAULT, mask_sensitive_text, parse_json_loose
+from app.paper_digest_app import CEREBRAS_API_BASE_DEFAULT, mask_sensitive_text, parse_json_loose
 
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"

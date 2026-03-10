@@ -10,12 +10,7 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Live Demo
-- Demo artifact in repo: [docs/demo/index.html](docs/demo/index.html)
-- GitHub Pages URL format: `https://<github-username>.github.io/<repo-name>/demo/`
-- If you see `404 There isn't a GitHub Pages site here`:
-  1. Open repository `Settings -> Pages` and set source to **GitHub Actions**.
-  2. Run workflow [deploy-demo-pages](.github/workflows/deploy-demo-pages.yml).
-  3. Open the URL shown in the `github-pages` environment deployment.
+<a href="https://jeong87.github.io/paper-morning/demo/" target="_blank" rel="noopener noreferrer">Open Live Demo (new tab)</a>
 
 ## What It Does
 1. Reads your project context and saved search queries.
@@ -36,13 +31,13 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 1. Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r deps/requirements.txt
 ```
 
 2. Run web console:
 
 ```bash
-python web_app.py --host 127.0.0.1 --port 5050
+python app/web_app.py --host 127.0.0.1 --port 5050
 ```
 
 3. Open:
@@ -77,13 +72,13 @@ Optional secret:
 ## Build Distribution Files
 ### Windows
 ```powershell
-.\build_windows.ps1
+.\tools\build_windows.ps1
 ```
 
 ### Linux
 ```bash
-chmod +x build_linux.sh
-./build_linux.sh
+chmod +x tools/build_linux.sh
+./tools/build_linux.sh
 ```
 
 ## Demo Pages Deployment
