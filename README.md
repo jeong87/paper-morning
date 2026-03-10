@@ -10,7 +10,7 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Live Demo
-<a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html" target="_blank" rel="noopener noreferrer">Open Live Demo (new tab)</a>
+<a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html" target="_blank" rel="noopener noreferrer">Open Live Demo</a>
 
 ## What It Does
 1. Reads your project context and saved search queries.
@@ -27,26 +27,11 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Output language control via `.env`:
   - `OUTPUT_LANGUAGE=en|ko|ja|es|...`
 
-## Quick Start (Local Web Console)
-1. Install dependencies:
-
-```bash
-pip install -r deps/requirements.txt
-```
-
-2. Run web console:
-
-```bash
-python app/web_app.py --host 127.0.0.1 --port 5050
-```
-
-3. Open:
-
-```text
-http://127.0.0.1:5050
-```
-
-4. Configure keys/settings, then save topics/queries.
+## Quick Start
+- Beginner (English): [docs/manuals/MANUAL_FIRSTTIME_EN.md](docs/manuals/MANUAL_FIRSTTIME_EN.md)
+- Full operations (English): [docs/manuals/MANUAL_EN.md](docs/manuals/MANUAL_EN.md)
+- Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
+- Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
 
 ## GitHub Actions Mode (Recommended)
 If you do not want your PC running 24/7, use Actions.
@@ -68,6 +53,27 @@ Optional secret:
 - `LLM_MAX_CANDIDATES`: prefilter cap for LLM scoring.
 - `OUTPUT_LANGUAGE`: summary language for LLM-generated reason/core/usefulness text.
 - `ENABLE_GOOGLE_SCHOLAR` + `GOOGLE_SCHOLAR_API_KEY`: optional SerpAPI source.
+
+## Local Web Console
+1. Install dependencies:
+
+```bash
+pip install -r deps/requirements.txt
+```
+
+2. Run web console:
+
+```bash
+python app/web_app.py --host 127.0.0.1 --port 5050
+```
+
+3. Open:
+
+```text
+http://127.0.0.1:5050
+```
+
+4. Configure keys/settings, then save topics/queries.
 
 ## Build Distribution Files
 ### Windows
@@ -104,6 +110,8 @@ Gmail app password docs:
 - https://myaccount.google.com/apppasswords
 
 ## Documentation
+- Beginner (English): [docs/manuals/MANUAL_FIRSTTIME_EN.md](docs/manuals/MANUAL_FIRSTTIME_EN.md)
+- Full operations (English): [docs/manuals/MANUAL_EN.md](docs/manuals/MANUAL_EN.md)
 - Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
 - Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
 - Korean README (legacy): [docs/manuals/README_KR.md](docs/manuals/README_KR.md)

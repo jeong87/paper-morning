@@ -15,6 +15,14 @@ All notable changes to **paper-morning** are documented in this file.
 
 ### Docs
 - Updated visible version labels in README files to `v0.5.1`.
+- README section order adjusted:
+  - `GitHub Actions Mode` moved to the earlier quick-start position
+  - `Local Web Console` moved below `Important Settings`
+- Added English manuals:
+  - `docs/manuals/MANUAL_FIRSTTIME_EN.md`
+  - `docs/manuals/MANUAL_EN.md`
+- Added 4 manual links (EN/KR beginner + full) under README `Quick Start`.
+- Updated Live Demo label text from `Open Live Demo (new tab)` to `Open Live Demo`.
 
 ### Version
 - App version bumped to `paper-morning v0.5.1`.
