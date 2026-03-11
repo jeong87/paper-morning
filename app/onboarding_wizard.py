@@ -256,7 +256,7 @@ def main() -> int:
     )
     if enable_google_oauth:
         print("Google OAuth mode selected. You can leave app password empty.")
-        print("Refresh token will be saved after clicking 'Google 로그인 연결' in Web Console.\n")
+        print("Refresh token will be saved after clicking 'Connect Google OAuth' in Web Console.\n")
         gmail_app_password = prompt_text(
             "Gmail App Password (optional fallback, can be blank)",
             default="",
@@ -266,7 +266,7 @@ def main() -> int:
     else:
         gmail_app_password = prompt_text("Gmail App Password (16 chars)", required=True, secret=True)
 
-    timezone_name = prompt_text("Timezone (e.g. Asia/Seoul, America/New_York)", default="Asia/Seoul")
+    timezone_name = prompt_text("Timezone (e.g. America/New_York, Europe/London, Asia/Seoul)", default="UTC")
     send_hour = prompt_int("Send hour (0-23)", 9, 0, 23)
     send_minute = prompt_int("Send minute (0-59)", 0, 0, 59)
 
@@ -450,7 +450,7 @@ def main() -> int:
     print(f"Saved topics: {topics_path}")
     if query_count == 0:
         print(
-            "No search query configured yet. Open Topic Editor and run 'Keyword / Query 생성' "
+            "No search query configured yet. Open Topic Editor and run 'Keyword / Query Generation' "
             "or enter queries manually before Send Now."
         )
     print("Next steps:")

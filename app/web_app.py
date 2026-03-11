@@ -62,6 +62,7 @@ SCHEDULER_JOB_ID = "daily-paper-digest-web-job"
 SESSION_SECRET_ENV_KEY = "WEB_APP_SECRET_KEY"
 AUTH_TOKEN_ENV_KEY = "WEB_APP_AUTH_TOKEN"
 WEB_AUTH_SESSION_KEY = "pm_auth_ok"
+UI_LANGUAGE_SESSION_KEY = "pm_ui_lang"
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -85,6 +86,7 @@ EXPECTED_ENV_KEYS = [
     "TIMEZONE",
     "SEND_HOUR",
     "SEND_MINUTE",
+    "SEND_TIME_WINDOW_MINUTES",
     "SEND_FREQUENCY",
     "SEND_ANCHOR_DATE",
     "LOOKBACK_HOURS",
@@ -102,6 +104,7 @@ EXPECTED_ENV_KEYS = [
     "NCBI_API_KEY",
     "USER_TOPICS_FILE",
     "WEB_PASSWORD",
+    "UI_LANGUAGE",
     "ALLOW_INSECURE_REMOTE_WEB",
     "USE_KEYRING",
     "ENABLE_GOOGLE_OAUTH",
@@ -133,9 +136,10 @@ DEFAULT_ENV_VALUES = {
     "GMAIL_ADDRESS": "",
     "GMAIL_APP_PASSWORD": "",
     "RECIPIENT_EMAIL": "",
-    "TIMEZONE": "Asia/Seoul",
+    "TIMEZONE": "UTC",
     "SEND_HOUR": "9",
     "SEND_MINUTE": "0",
+    "SEND_TIME_WINDOW_MINUTES": "15",
     "SEND_FREQUENCY": "daily",
     "SEND_ANCHOR_DATE": "2026-01-01",
     "LOOKBACK_HOURS": "24",
@@ -153,6 +157,7 @@ DEFAULT_ENV_VALUES = {
     "NCBI_API_KEY": "",
     "USER_TOPICS_FILE": "user_topics.json",
     "WEB_PASSWORD": "",
+    "UI_LANGUAGE": "en",
     "ALLOW_INSECURE_REMOTE_WEB": "false",
     "USE_KEYRING": "true",
     "ENABLE_GOOGLE_OAUTH": "false",
@@ -198,7 +203,7 @@ APP_LOGO_FILENAME = "paper-morning-logo.png"
 
 BASE_TEMPLATE = """
 <!doctype html>
-<html lang="ko">
+<html lang="{{ ui_language }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -938,12 +943,12 @@ def ensure_host_security(host: str, env_map: Dict[str, str] | None = None) -> No
     allow_insecure_remote = env_truthy(str(values.get("ALLOW_INSECURE_REMOTE_WEB", "false")))
     if not allow_insecure_remote:
         raise ValueError(
-            "원격 host 바인딩(0.0.0.0 등)은 기본 차단됩니다. "
-            "정말 필요한 경우에만 ALLOW_INSECURE_REMOTE_WEB=true와 WEB_PASSWORD를 함께 설정하세요."
+            "Remote host binding (e.g. 0.0.0.0) is blocked by default. "
+            "Only enable ALLOW_INSECURE_REMOTE_WEB=true together with WEB_PASSWORD when strictly required."
         )
     if not get_web_password(values):
         raise ValueError(
-            "--host를 127.0.0.1 외로 지정하려면 WEB_PASSWORD를 먼저 설정해야 합니다."
+            "To bind --host to non-local addresses, set WEB_PASSWORD first."
         )
     logging.warning(
         "Running web console on non-local host without TLS. This is for controlled test use only."
@@ -1015,7 +1020,7 @@ def check_send_cooldown(env_map: Dict[str, str] | None = None) -> Tuple[bool, st
     if elapsed >= cooldown_seconds:
         return True, ""
     wait = int(max(1, cooldown_seconds - elapsed))
-    return False, f"Send Now 재실행은 {wait}초 후 가능합니다."
+    return False, f"Send-now can be retried after {wait} seconds."
 
 
 def mark_send_now_executed() -> None:
@@ -1072,6 +1077,27 @@ def write_env_map(updated_values: Dict[str, str]) -> None:
     env_path.parent.mkdir(parents=True, exist_ok=True)
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     enforce_private_file_permissions(env_path)
+
+
+def normalize_ui_language(raw: str) -> str:
+    value = str(raw or "").strip().lower()
+    if value.startswith("ko"):
+        return "ko"
+    return "en"
+
+
+def get_ui_language(env_map: Dict[str, str] | None = None) -> str:
+    requested = str(request.args.get("lang", "") or "").strip().lower()
+    if requested in {"en", "ko"}:
+        session[UI_LANGUAGE_SESSION_KEY] = requested
+        return requested
+    cached = str(session.get(UI_LANGUAGE_SESSION_KEY, "") or "").strip().lower()
+    if cached in {"en", "ko"}:
+        return cached
+    values = env_map or read_env_map()
+    default_lang = normalize_ui_language(str(values.get("UI_LANGUAGE", "en")))
+    session[UI_LANGUAGE_SESSION_KEY] = default_lang
+    return default_lang
 
 
 def get_topics_path(env_map: Dict[str, str]) -> Path:
@@ -1134,6 +1160,7 @@ def scheduler_status_text() -> str:
 
 
 def render_page(title: str, body: str, active_page: str = ""):
+    ui_language = get_ui_language()
     return render_template_string(
         BASE_TEMPLATE,
         title=title,
@@ -1141,25 +1168,26 @@ def render_page(title: str, body: str, active_page: str = ""):
         auth_token=APP_AUTH_TOKEN,
         active_page=active_page,
         app_version=APP_VERSION,
+        ui_language=ui_language,
     )
 
 
 def test_gmail_login(gmail_address: str, gmail_app_password: str) -> Tuple[bool, str]:
     if not gmail_address or not gmail_app_password:
-        return False, "GMAIL_ADDRESS/GMAIL_APP_PASSWORD가 비어 있습니다."
+        return False, "GMAIL_ADDRESS/GMAIL_APP_PASSWORD is empty."
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
             smtp.login(gmail_address, "".join(gmail_app_password.split()))
-        return True, "Gmail SMTP 로그인 성공"
+        return True, "Gmail SMTP login success."
     except Exception as exc:
-        return False, f"Gmail 로그인 실패: {safe_exception_text(exc)}"
+        return False, f"Gmail login failed: {safe_exception_text(exc)}"
 
 
 def test_google_oauth_gmail(env_map: Dict[str, str]) -> Tuple[bool, str]:
     enabled = env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false")))
     use_for_gmail = env_truthy(str(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")))
     if not enabled or not use_for_gmail:
-        return False, "Google OAuth Gmail 사용이 꺼져 있습니다."
+        return False, "Google OAuth for Gmail is disabled."
     oauth_values = get_effective_google_oauth_values(env_map)
     client_id = str(oauth_values.get("client_id", "")).strip()
     client_secret = str(oauth_values.get("client_secret", "")).strip()
@@ -1168,21 +1196,21 @@ def test_google_oauth_gmail(env_map: Dict[str, str]) -> Tuple[bool, str]:
         str(env_map.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")),
     )
     if not client_id or not client_secret or not refresh_token:
-        return False, "Google OAuth 설정/연결이 완료되지 않았습니다."
+        return False, "Google OAuth setup/connection is incomplete."
     try:
         access_token = refresh_google_oauth_access_token(client_id, client_secret, refresh_token)
         info = fetch_google_userinfo(access_token)
         email = str(info.get("email", "")).strip()
         if email:
-            return True, f"Google OAuth 토큰 갱신 성공 ({email})"
-        return True, "Google OAuth 토큰 갱신 성공"
+            return True, f"Google OAuth token refresh success ({email})"
+        return True, "Google OAuth token refresh success."
     except Exception as exc:
-        return False, f"Google OAuth 확인 실패: {safe_exception_text(exc)}"
+        return False, f"Google OAuth check failed: {safe_exception_text(exc)}"
 
 
 def test_gemini_key(gemini_api_key: str, gemini_model: str) -> Tuple[bool, str]:
     if not gemini_api_key:
-        return False, "GEMINI_API_KEY가 비어 있습니다."
+        return False, "GEMINI_API_KEY is empty."
     payload = {
         "contents": [{"role": "user", "parts": [{"text": "Return JSON: {\"ok\": true}"}]}],
         "generationConfig": {
@@ -1199,10 +1227,10 @@ def test_gemini_key(gemini_api_key: str, gemini_model: str) -> Tuple[bool, str]:
             timeout_seconds=30,
         )
         if used_model != gemini_model:
-            return True, f"Gemini API 호출 성공 (fallback model: {used_model})"
-        return True, "Gemini API 호출 성공"
+            return True, f"Gemini API call success (fallback model: {used_model})"
+        return True, "Gemini API call success."
     except Exception as exc:
-        return False, f"Gemini 호출 실패: {safe_exception_text(exc)}"
+        return False, f"Gemini call failed: {safe_exception_text(exc)}"
 
 
 def test_cerebras_key(
@@ -1211,7 +1239,7 @@ def test_cerebras_key(
     cerebras_api_base: str,
 ) -> Tuple[bool, str]:
     if not cerebras_api_key:
-        return False, "CEREBRAS_API_KEY가 비어 있습니다."
+        return False, "CEREBRAS_API_KEY is empty."
     base_url = (cerebras_api_base or CEREBRAS_API_BASE_DEFAULT).strip().rstrip("/")
     if not base_url:
         base_url = CEREBRAS_API_BASE_DEFAULT
@@ -1232,14 +1260,14 @@ def test_cerebras_key(
             timeout=30,
         )
         response.raise_for_status()
-        return True, "Cerebras API 호출 성공"
+        return True, "Cerebras API call success."
     except Exception as exc:
-        return False, f"Cerebras 호출 실패: {safe_exception_text(exc)}"
+        return False, f"Cerebras call failed: {safe_exception_text(exc)}"
 
 
 def test_semantic_scholar_key(semantic_api_key: str) -> Tuple[bool, str]:
     if not semantic_api_key:
-        return False, "SEMANTIC_SCHOLAR_API_KEY가 비어 있습니다."
+        return False, "SEMANTIC_SCHOLAR_API_KEY is empty."
     try:
         response = requests.get(
             "https://api.semanticscholar.org/graph/v1/paper/search",
@@ -1252,14 +1280,14 @@ def test_semantic_scholar_key(semantic_api_key: str) -> Tuple[bool, str]:
             timeout=30,
         )
         response.raise_for_status()
-        return True, "Semantic Scholar API 호출 성공"
+        return True, "Semantic Scholar API call success."
     except Exception as exc:
-        return False, f"Semantic Scholar 호출 실패: {safe_exception_text(exc)}"
+        return False, f"Semantic Scholar call failed: {safe_exception_text(exc)}"
 
 
 def test_google_scholar_key(google_scholar_api_key: str) -> Tuple[bool, str]:
     if not google_scholar_api_key:
-        return False, "GOOGLE_SCHOLAR_API_KEY가 비어 있습니다."
+        return False, "GOOGLE_SCHOLAR_API_KEY is empty."
     try:
         response = requests.get(
             "https://serpapi.com/search.json",
@@ -1272,42 +1300,46 @@ def test_google_scholar_key(google_scholar_api_key: str) -> Tuple[bool, str]:
             timeout=30,
         )
         response.raise_for_status()
-        return True, "Google Scholar(SerpAPI) 호출 성공"
+        return True, "Google Scholar (SerpAPI) call success."
     except Exception as exc:
-        return False, f"Google Scholar(SerpAPI) 호출 실패: {safe_exception_text(exc)}"
+        return False, f"Google Scholar (SerpAPI) call failed: {safe_exception_text(exc)}"
 
 
 def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
     warnings: List[str] = []
     if env_truthy(str(env_map.get("ALLOW_INSECURE_REMOTE_WEB", "false"))):
         warnings.append(
-            "ALLOW_INSECURE_REMOTE_WEB=true: TLS 없는 원격 노출은 키/비밀번호 유출 위험이 큽니다."
+            "ALLOW_INSECURE_REMOTE_WEB=true: remote exposure without TLS can leak keys/passwords."
         )
     if not env_truthy(str(env_map.get("USE_KEYRING", "true"))):
         warnings.append(
-            "USE_KEYRING=false: 비밀값이 .env 파일에 평문 저장됩니다."
+            "USE_KEYRING=false: secrets are stored in plaintext in .env."
         )
     elif not is_keyring_available():
         warnings.append(
-            "USE_KEYRING=true 이지만 keyring 모듈/백엔드를 찾지 못했습니다. 현재는 평문 .env 저장으로 동작합니다."
+            "USE_KEYRING=true but keyring backend is unavailable. Falling back to plaintext .env storage."
         )
     if env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false"))):
         oauth_values = get_effective_google_oauth_values(env_map)
         if not str(oauth_values.get("client_id", "")).strip():
-            warnings.append("ENABLE_GOOGLE_OAUTH=true 이지만 GOOGLE_OAUTH_CLIENT_ID가 비어 있습니다. (또는 내장 OAuth 번들이 없습니다.)")
+            warnings.append(
+                "ENABLE_GOOGLE_OAUTH=true but GOOGLE_OAUTH_CLIENT_ID is empty (or bundled OAuth client is missing)."
+            )
         if not str(oauth_values.get("client_secret", "")).strip():
-            warnings.append("ENABLE_GOOGLE_OAUTH=true 이지만 GOOGLE_OAUTH_CLIENT_SECRET가 비어 있습니다. (또는 내장 OAuth 번들이 없습니다.)")
+            warnings.append(
+                "ENABLE_GOOGLE_OAUTH=true but GOOGLE_OAUTH_CLIENT_SECRET is empty (or bundled OAuth client is missing)."
+            )
         if not resolve_secret_value(
             "GOOGLE_OAUTH_REFRESH_TOKEN",
             str(env_map.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")),
         ):
-            warnings.append("Google OAuth가 아직 연결되지 않았습니다. 'Google 로그인 연결' 버튼을 실행하세요.")
+            warnings.append("Google OAuth is not connected yet.")
 
     try:
         max_queries = int(str(env_map.get("MAX_SEARCH_QUERIES_PER_SOURCE", "4")).strip())
         if max_queries > 30:
             warnings.append(
-                f"MAX_SEARCH_QUERIES_PER_SOURCE={max_queries}: API 호출량이 과도할 수 있습니다."
+                f"MAX_SEARCH_QUERIES_PER_SOURCE={max_queries}: API call volume may be excessive."
             )
     except ValueError:
         pass
@@ -1316,7 +1348,7 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
         semantic_max = int(str(env_map.get("SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY", "20")).strip())
         if semantic_max > 50:
             warnings.append(
-                f"SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY={semantic_max}: 호출량/응답시간이 증가할 수 있습니다."
+                f"SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY={semantic_max}: request volume/latency may increase."
             )
     except ValueError:
         pass
@@ -1324,30 +1356,30 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
     try:
         llm_candidates = int(str(env_map.get("LLM_MAX_CANDIDATES", "30")).strip())
         if llm_candidates > 80:
-            warnings.append("LLM_MAX_CANDIDATES는 최대 80까지 권장됩니다. 실행 시 80으로 제한 적용됩니다.")
+            warnings.append("LLM_MAX_CANDIDATES above 80 is not recommended. Runtime cap is 80.")
         elif llm_candidates > 55:
-            warnings.append(f"LLM_MAX_CANDIDATES={llm_candidates}: LLM 비용이 증가할 수 있습니다.")
+            warnings.append(f"LLM_MAX_CANDIDATES={llm_candidates}: LLM cost may increase.")
     except ValueError:
         pass
     if env_truthy(str(env_map.get("ENABLE_GEMINI_ADVANCED_REASONING", "true"))):
-        warnings.append("고급 추론(3.1 Pro)이 활성화되어 있습니다. 속도/비용이 증가할 수 있습니다.")
+        warnings.append("Advanced reasoning (Gemini 3.1 Pro) is enabled. Speed/cost may increase.")
 
     if not str(env_map.get("NCBI_API_KEY", "")).strip():
-        warnings.append("NCBI_API_KEY 미설정: PubMed 쿼리 처리량 제한에 걸릴 수 있습니다.")
+        warnings.append("NCBI_API_KEY is not set: PubMed throughput may be rate-limited.")
 
     if env_truthy(str(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false"))):
         if not resolve_secret_value(
             "GOOGLE_SCHOLAR_API_KEY",
             str(env_map.get("GOOGLE_SCHOLAR_API_KEY", "")),
         ):
-            warnings.append("ENABLE_GOOGLE_SCHOLAR=true 이지만 GOOGLE_SCHOLAR_API_KEY가 비어 있습니다.")
+            warnings.append("ENABLE_GOOGLE_SCHOLAR=true but GOOGLE_SCHOLAR_API_KEY is empty.")
 
     return warnings
 
 
 def register_windows_scheduled_task() -> Tuple[bool, str]:
     if os.name != "nt":
-        return False, "Windows에서만 지원됩니다."
+        return False, "Supported on Windows only."
 
     candidates = [
         get_runtime_base_dir() / "tools" / "register_task.ps1",
@@ -1358,7 +1390,7 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
     ]
     script_path = next((path for path in candidates if path.exists()), None)
     if not script_path:
-        return False, "register_task.ps1 파일을 찾을 수 없습니다."
+        return False, "register_task.ps1 was not found."
 
     env_map = read_env_map()
     send_hour_raw = str(env_map.get("SEND_HOUR", "9")).strip()
@@ -1403,16 +1435,16 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
             check=False,
         )
     except Exception as exc:
-        return False, f"작업 스케줄러 등록 실행 실패: {safe_exception_text(exc)}"
+        return False, f"Task Scheduler registration failed to execute: {safe_exception_text(exc)}"
 
     output = (completed.stdout or "").strip()
     error = (completed.stderr or "").strip()
     if completed.returncode != 0:
-        message = error or output or "알 수 없는 오류"
-        return False, f"등록 실패: {message}"
+        message = error or output or "Unknown error"
+        return False, f"Registration failed: {message}"
     return (
         True,
-        (output or "Windows 작업 스케줄러 등록 완료")
+        (output or "Windows Task Scheduler registration completed")
         + f" (user {send_hour:02d}:{send_minute:02d} -> internal {internal_hour:02d}:{internal_minute:02d})",
     )
 
@@ -1567,11 +1599,11 @@ def has_configured_topic_queries(
 
 def read_log_tail(path: Path, max_lines: int = 400, max_chars: int = 200_000) -> str:
     if not path.exists():
-        return "로그 파일이 아직 생성되지 않았습니다."
+        return "Log file has not been created yet."
     try:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
     except Exception as exc:
-        return f"로그 파일 읽기 실패: {exc}"
+        return f"Failed to read log file: {exc}"
     if len(text) > max_chars:
         text = text[-max_chars:]
     lines = text.splitlines()
@@ -1604,7 +1636,7 @@ def start_background_job(kind: str) -> Tuple[bool, str]:
         ):
             return (
                 False,
-                "검색 쿼리가 없습니다. Topic Editor에서 'Keyword / Query 생성' 또는 arXiv/PubMed/Semantic Scholar/Google Scholar 쿼리를 수동 입력 후 Save Topics를 먼저 실행하세요.",
+                "No search queries are configured. In Topic Editor, run 'Generate Keyword / Query' or manually enter arXiv/PubMed/Semantic Scholar/Google Scholar queries, then save topics first.",
             )
 
     if kind == "send_now":
@@ -1912,69 +1944,67 @@ def build_home_body() -> str:
     )
     oauth_ready = oauth_enabled and oauth_use_for_gmail and oauth_client_ready and oauth_refresh_ready
     oauth_bundle_ready = bool(oauth_values.get("bundle_ready"))
-    oauth_source = "Settings 입력값"
+    oauth_source = "Settings values"
     if oauth_values.get("using_bundled_client_id") or oauth_values.get("using_bundled_client_secret"):
-        oauth_source = "배포판 내장 번들"
+        oauth_source = "Bundled distribution"
     if oauth_ready:
-        oauth_badge_html = '<span class="badge badge-running">🟢 연결 완료</span>'
-        oauth_message = "Google OAuth로 Gmail 발송이 활성화되어 있습니다."
+        oauth_badge_html = '<span class="badge badge-running">🟢 Connected</span>'
+        oauth_message = "Google OAuth Gmail sending is enabled."
     elif oauth_client_ready:
-        oauth_badge_html = '<span class="badge badge-idle">🟡 로그인 필요</span>'
-        oauth_message = "클라이언트 설정은 준비됨. Google 로그인 연결을 완료하세요."
+        oauth_badge_html = '<span class="badge badge-idle">🟡 Sign-in required</span>'
+        oauth_message = "OAuth client settings are ready. Complete Google sign-in to connect."
     else:
-        oauth_badge_html = '<span class="badge badge-danger">🔴 미설정</span>'
-        oauth_message = "OAuth 클라이언트 정보가 없습니다. 내장 번들 또는 Settings 입력이 필요합니다."
+        oauth_badge_html = '<span class="badge badge-danger">🔴 Not configured</span>'
+        oauth_message = "OAuth client information is missing. Provide settings values or a bundled client."
     if OAUTH_UI_ENABLED:
         oauth_controls_html = (
-            f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Google 로그인 연결</a>'
-            '<button type="button" class="btn-danger" onclick="disconnectGoogleOauth()">연결 해제</button>'
+            f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Connect Google sign-in</a>'
+            '<button type="button" class="btn-danger" onclick="disconnectGoogleOauth()">Disconnect</button>'
         )
         oauth_disabled_note = ""
     else:
-        oauth_controls_html = (
-            '<button type="button" class="btn btn-ghost" disabled>Google 로그인 연결</button>'
-            '<button type="button" class="btn-danger" disabled>연결 해제</button>'
-        )
-        oauth_disabled_note = "현재 배포판에서는 OAuth UI가 비활성화되어 있습니다. Gmail 앱 비밀번호 방식을 사용하세요."
+        oauth_controls_html = ""
+        oauth_disabled_note = ""
+    oauth_card_style = "" if OAUTH_UI_ENABLED else 'style="display:none;"'
     send_frequency = str(env_map.get("SEND_FREQUENCY", "daily") or "daily").strip().lower()
     send_frequency_label = {
-        "daily": "매일",
-        "every_3_days": "3일마다",
-        "weekly": "매주(7일)",
+        "daily": "Daily",
+        "every_3_days": "Every 3 days",
+        "weekly": "Weekly (7 days)",
     }.get(send_frequency, send_frequency)
 
     body = """
     <div class="page-header">
       <h1>Dashboard</h1>
-      <p>논문 수집/발송을 수동으로 실행하거나, 스케줄러 상태를 확인합니다.</p>
+      <p>Run collection/sending manually and monitor scheduler status.</p>
     </div>
 
     <div class="card" style="display:flex; align-items:center; gap:10px; padding:14px 18px;">
       <span id="sched-icon" style="font-size:18px;">📅</span>
       <div>
         <span id="sched-text" style="font-size:13.5px; font-weight:500;">__SCHEDULER_STATUS__</span>
-        <div class="small" style="margin-top:4px;">발송 주기: <b>__SEND_FREQUENCY__</b></div>
+        <div class="small" style="margin-top:4px;">Send frequency: <b>__SEND_FREQUENCY__</b></div>
       </div>
     </div>
 
-    <div class="card">
-      <p class="card-title">Google OAuth 상태</p>
+    <div class="card" __OAUTH_CARD_STYLE__>
+      <p class="card-title">Google OAuth Status</p>
       <div class="status-panel">
         <div class="status-kv">
-          <div class="kv-label">연결 상태</div>
+          <div class="kv-label">Connection Status</div>
           <div class="kv-value">__OAUTH_BADGE__</div>
         </div>
         <div class="status-kv">
-          <div class="kv-label">연동 계정</div>
+          <div class="kv-label">Connected Account</div>
           <div class="kv-value">__OAUTH_EMAIL__</div>
         </div>
         <div class="status-kv">
-          <div class="kv-label">클라이언트 소스</div>
+          <div class="kv-label">Client Source</div>
           <div class="kv-value">__OAUTH_SOURCE__</div>
         </div>
       </div>
       <p class="small" style="margin-top:8px;">__OAUTH_MESSAGE__</p>
-      <p class="small" style="margin-top:6px; color:var(--text-sub);">내장 번들 준비 상태: __OAUTH_BUNDLE_READY__</p>
+      <p class="small" style="margin-top:6px; color:var(--text-sub);">Bundled client status: __OAUTH_BUNDLE_READY__</p>
       <p class="small" style="margin-top:6px; color:var(--text-sub);">__OAUTH_DISABLED_NOTE__</p>
       <div class="button-row" style="margin-top:12px;">
         __OAUTH_CONTROLS_HTML__
@@ -1985,26 +2015,26 @@ def build_home_body() -> str:
       <div class="action-card">
         <span class="action-icon">🔍</span>
         <span class="action-label">Dry-Run</span>
-        <span class="action-desc">메일 발송 없이 오늘 수집/선별 결과만 확인합니다.</span>
-        <button id="btn-dry" onclick="startJob('dry_run')">실행</button>
+        <span class="action-desc">Run collection/ranking without sending email.</span>
+        <button id="btn-dry" onclick="startJob('dry_run')">Run</button>
       </div>
       <div class="action-card">
         <span class="action-icon">📨</span>
         <span class="action-label">Send Now</span>
-        <span class="action-desc">지금 즉시 실제 논문 리포트 메일을 1회 발송합니다.</span>
-        <button id="btn-send" class="btn-success" onclick="startJob('send_now')">발송</button>
+        <span class="action-desc">Send one real digest email immediately.</span>
+        <button id="btn-send" class="btn-success" onclick="startJob('send_now')">Send</button>
       </div>
       <div class="action-card">
         <span class="action-icon">🔄</span>
         <span class="action-label">Reload Scheduler</span>
-        <span class="action-desc">변경된 발송 시간/설정을 스케줄러에 다시 반영합니다.</span>
-        <button id="btn-reload" class="btn-ghost" onclick="startJob('reload_scheduler')">리로드</button>
+        <span class="action-desc">Reload scheduler with updated send time/settings.</span>
+        <button id="btn-reload" class="btn-ghost" onclick="startJob('reload_scheduler')">Reload</button>
       </div>
       <div class="action-card">
         <span class="action-icon">🪟</span>
         <span class="action-label">Windows Task</span>
-        <span class="action-desc">Windows 작업 스케줄러에 매일 자동 실행 작업을 등록합니다.</span>
-        <button id="btn-task" class="btn-ghost" onclick="startJob('register_windows_task')">등록</button>
+        <span class="action-desc">Register a daily task in Windows Task Scheduler.</span>
+        <button id="btn-task" class="btn-ghost" onclick="startJob('register_windows_task')">Register</button>
       </div>
     </div>
 
@@ -2012,15 +2042,15 @@ def build_home_body() -> str:
       <p class="card-title">Task Status</p>
       <div class="status-panel">
         <div class="status-kv">
-          <div class="kv-label">상태</div>
-          <div class="kv-value" id="status-badge"><span class="badge badge-idle">⬜ 대기 중</span></div>
+          <div class="kv-label">Status</div>
+          <div class="kv-value" id="status-badge"><span class="badge badge-idle">⬜ Idle</span></div>
         </div>
         <div class="status-kv">
-          <div class="kv-label">시작 시각</div>
+          <div class="kv-label">Started At</div>
           <div class="kv-value" id="status-started">—</div>
         </div>
         <div class="status-kv">
-          <div class="kv-label">완료 시각</div>
+          <div class="kv-label">Finished At</div>
           <div class="kv-value" id="status-finished">—</div>
         </div>
       </div>
@@ -2034,7 +2064,7 @@ def build_home_body() -> str:
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <p class="card-title" style="margin:0; border:none; padding:0;">Last Dry-Run Output</p>
-        <button class="btn-ghost" onclick="toggleOutput()" id="btn-toggle" style="padding:4px 10px; font-size:12px;">접기 ▲</button>
+        <button class="btn-ghost" onclick="toggleOutput()" id="btn-toggle" style="padding:4px 10px; font-size:12px;">Collapse ▲</button>
       </div>
       <div id="output-wrap">
         <pre id="output-pre">__LAST_DRY_OUTPUT__</pre>
@@ -2048,7 +2078,7 @@ def build_home_body() -> str:
         const btn = document.getElementById('btn-toggle');
         outputVisible = !outputVisible;
         wrap.style.display = outputVisible ? '' : 'none';
-        btn.textContent = outputVisible ? '접기 ▲' : '펼치기 ▼';
+        btn.textContent = outputVisible ? 'Collapse ▲' : 'Expand ▼';
       }
 
       const JOB_LABEL = { dry_run: 'Dry-Run', send_now: 'Send Now', reload_scheduler: 'Reload Scheduler', register_windows_task: 'Windows Task Register', none: '' };
@@ -2085,11 +2115,11 @@ def build_home_body() -> str:
 
         const badgeEl = document.getElementById('status-badge');
         if (running) {
-          badgeEl.innerHTML = `<span class="badge badge-running">🔵 실행 중 — ${JOB_LABEL[kind]}</span>`;
+          badgeEl.innerHTML = `<span class="badge badge-running">🔵 Running — ${JOB_LABEL[kind]}</span>`;
         } else if (hasError) {
-          badgeEl.innerHTML = '<span class="badge badge-danger">🔴 실패</span>';
+          badgeEl.innerHTML = '<span class="badge badge-danger">🔴 Failed</span>';
         } else {
-          badgeEl.innerHTML = '<span class="badge badge-idle">⬜ 대기 중</span>';
+          badgeEl.innerHTML = '<span class="badge badge-idle">⬜ Idle</span>';
         }
         setButtonsDisabled(running);
       }
@@ -2112,7 +2142,7 @@ def build_home_body() -> str:
       }
 
       async function disconnectGoogleOauth() {
-        if (!confirm('Google OAuth 연결을 해제할까요?')) {
+        if (!confirm('Disconnect Google OAuth?')) {
           return;
         }
         try {
@@ -2121,12 +2151,12 @@ def build_home_body() -> str:
             headers: { 'X-App-Token': window.APP_TOKEN || '' },
           });
           if (!res.ok) {
-            alert('OAuth 연결 해제 실패');
+            alert('Failed to disconnect OAuth');
             return;
           }
           window.location.reload();
         } catch (err) {
-          alert('OAuth 연결 해제 실패');
+          alert('Failed to disconnect OAuth');
         }
       }
 
@@ -2140,12 +2170,13 @@ def build_home_body() -> str:
         .replace("__SEND_FREQUENCY__", html.escape(send_frequency_label))
         .replace("__LAST_DRY_OUTPUT__", escaped_output)
         .replace("__OAUTH_BADGE__", oauth_badge_html)
-        .replace("__OAUTH_EMAIL__", html.escape(oauth_connected_email or "미연결"))
+        .replace("__OAUTH_EMAIL__", html.escape(oauth_connected_email or "Not connected"))
         .replace("__OAUTH_SOURCE__", html.escape(oauth_source))
         .replace("__OAUTH_MESSAGE__", html.escape(oauth_message))
-        .replace("__OAUTH_BUNDLE_READY__", "있음" if oauth_bundle_ready else "없음")
+        .replace("__OAUTH_BUNDLE_READY__", "Available" if oauth_bundle_ready else "Not available")
         .replace("__OAUTH_DISABLED_NOTE__", html.escape(oauth_disabled_note))
         .replace("__OAUTH_CONTROLS_HTML__", oauth_controls_html)
+        .replace("__OAUTH_CARD_STYLE__", oauth_card_style)
         .replace("__OAUTH_DISCONNECT_URL__", url_for("google_oauth_disconnect"))
         .replace("__API_STATUS__", url_for("jobs_status"))
         .replace("__API_START_BASE__", "/jobs/start")
@@ -2168,20 +2199,20 @@ def login():
         if submitted == configured_password:
             session[WEB_AUTH_SESSION_KEY] = True
             return redirect(next_path)
-        flash("비밀번호가 올바르지 않습니다.", "danger")
+        flash("Incorrect password.", "danger")
 
     body = f"""
     <div class="page-header">
       <h1>Login</h1>
-      <p>WEB_PASSWORD가 설정된 환경입니다. 비밀번호를 입력하세요.</p>
+      <p>WEB_PASSWORD is configured. Enter your password.</p>
     </div>
     <div class="card" style="max-width:420px;">
       <form method="post">
         <input type="hidden" name="next" value="{html.escape(next_path, quote=True)}" />
-        <label style="display:block; margin-bottom:8px; font-weight:600;">웹 콘솔 비밀번호</label>
+        <label style="display:block; margin-bottom:8px; font-weight:600;">Web console password</label>
         <input type="password" name="password" autocomplete="current-password" style="width:100%;" />
         <div style="margin-top:12px;">
-          <button type="submit">로그인</button>
+          <button type="submit">Sign in</button>
         </div>
       </form>
     </div>
@@ -2198,14 +2229,14 @@ def logout():
 @app.route("/oauth/google/start", methods=["GET"])
 def google_oauth_start():
     if not OAUTH_UI_ENABLED:
-        flash("현재 버전에서는 Google OAuth UI가 비활성화되어 있습니다. Gmail 앱 비밀번호를 사용하세요.", "danger")
+        flash("Google OAuth UI is disabled in this build. Use Gmail app password mode.", "danger")
         return redirect(url_for("settings"))
     env_map = read_env_map()
     oauth_values = get_effective_google_oauth_values(env_map)
     client_id = str(oauth_values.get("client_id", "")).strip()
     client_secret = str(oauth_values.get("client_secret", "")).strip()
     if not client_id or not client_secret:
-        flash("Google OAuth Client ID/Secret를 먼저 설정하세요. (또는 배포판 OAuth 번들 파일을 포함하세요.)", "danger")
+        flash("Set Google OAuth Client ID/Secret first (or include a bundled OAuth client file).", "danger")
         return redirect(url_for("settings"))
 
     redirect_uri = get_google_oauth_redirect_uri(env_map, prefer_request=True)
@@ -2229,22 +2260,22 @@ def google_oauth_start():
 @app.route("/oauth/google/callback", methods=["GET"])
 def google_oauth_callback():
     if not OAUTH_UI_ENABLED:
-        flash("현재 버전에서는 Google OAuth UI가 비활성화되어 있습니다. Gmail 앱 비밀번호를 사용하세요.", "danger")
+        flash("Google OAuth UI is disabled in this build. Use Gmail app password mode.", "danger")
         return redirect(url_for("settings"))
     error = request.args.get("error", "").strip()
     if error:
-        flash(f"Google OAuth 인증 실패: {error}", "danger")
+        flash(f"Google OAuth authentication failed: {error}", "danger")
         return redirect(url_for("settings"))
 
     returned_state = request.args.get("state", "").strip()
     expected_state = str(session.pop(GOOGLE_OAUTH_STATE_SESSION_KEY, "") or "").strip()
     if not returned_state or not expected_state or returned_state != expected_state:
-        flash("Google OAuth state 검증 실패. 다시 시도하세요.", "danger")
+        flash("Google OAuth state validation failed. Please try again.", "danger")
         return redirect(url_for("settings"))
 
     code = request.args.get("code", "").strip()
     if not code:
-        flash("Google OAuth code가 없습니다.", "danger")
+        flash("Google OAuth code is missing.", "danger")
         return redirect(url_for("settings"))
 
     env_map = read_env_map()
@@ -2256,7 +2287,7 @@ def google_oauth_callback():
         or get_google_oauth_redirect_uri(env_map, prefer_request=True)
     ).strip()
     if not client_id or not client_secret:
-        flash("Google OAuth Client ID/Secret가 설정되어 있지 않습니다.", "danger")
+        flash("Google OAuth Client ID/Secret is not configured.", "danger")
         return redirect(url_for("settings"))
     try:
         token_payload = exchange_google_oauth_code(client_id, client_secret, code, redirect_uri)
@@ -2269,7 +2300,7 @@ def google_oauth_callback():
         refresh_token = new_refresh_token or existing_refresh_token
         if not refresh_token:
             raise ValueError(
-                "refresh_token이 반환되지 않았습니다. Google 계정에서 앱 권한을 제거한 뒤 다시 연결해 주세요."
+                "No refresh_token was returned. Remove app access in your Google account and reconnect."
             )
 
         connected_email = ""
@@ -2292,18 +2323,18 @@ def google_oauth_callback():
         except Exception as exc:
             logging.warning("Scheduler refresh skipped after Google OAuth connect: %s", safe_exception_text(exc))
         if connected_email:
-            flash(f"Google 계정 연동 완료: {connected_email}", "ok")
+            flash(f"Google account connected: {connected_email}", "ok")
         else:
-            flash("Google 계정 연동 완료.", "ok")
+            flash("Google account connected.", "ok")
     except Exception as exc:
-        flash(f"Google OAuth 연결 실패: {safe_exception_text(exc)}", "danger")
+        flash(f"Google OAuth connection failed: {safe_exception_text(exc)}", "danger")
     return redirect(url_for("settings"))
 
 
 @app.route("/oauth/google/disconnect", methods=["POST"])
 def google_oauth_disconnect():
     if not OAUTH_UI_ENABLED:
-        flash("현재 버전에서는 Google OAuth UI가 비활성화되어 있습니다.", "danger")
+        flash("Google OAuth UI is disabled in this build.", "danger")
         return redirect(url_for("settings"))
     env_map = read_env_map()
     updated = dict(env_map)
@@ -2313,9 +2344,9 @@ def google_oauth_disconnect():
     updated["GOOGLE_OAUTH_CONNECTED_EMAIL"] = ""
     try:
         write_env_map(updated)
-        flash("Google OAuth 연결을 해제했습니다.", "ok")
+        flash("Google OAuth has been disconnected.", "ok")
     except Exception as exc:
-        flash(f"Google OAuth 해제 실패: {safe_exception_text(exc)}", "danger")
+        flash(f"Failed to disconnect Google OAuth: {safe_exception_text(exc)}", "danger")
     return redirect(url_for("settings"))
 
 
@@ -2397,10 +2428,10 @@ def setup():
                 refresh_scheduler()
             except Exception as exc:
                 logging.warning("Setup saved but scheduler reload skipped: %s", safe_exception_text(exc))
-            flash("Setup 저장 완료.", "ok")
+            flash("Setup saved successfully.", "ok")
             return redirect(url_for("home"))
         except Exception as exc:
-            flash(f"Setup 저장 실패: {safe_exception_text(exc)}", "danger")
+            flash(f"Failed to save setup: {safe_exception_text(exc)}", "danger")
             env_map = updated
 
     checked_llm = "checked" if env_truthy(env_map.get("ENABLE_LLM_AGENT", "true")) else ""
@@ -2417,15 +2448,16 @@ def setup():
         "checked" if env_truthy(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")) else ""
     )
     oauth_defaults = get_effective_google_oauth_values(env_map)
-    oauth_bundle_ready_text = "있음" if oauth_defaults.get("bundle_ready") else "없음"
-    oauth_source_text = "Settings 입력값"
+    oauth_bundle_ready_text = "Available" if oauth_defaults.get("bundle_ready") else "Not available"
+    oauth_source_text = "Settings values"
     if oauth_defaults.get("using_bundled_client_id") or oauth_defaults.get("using_bundled_client_secret"):
-        oauth_source_text = "배포판 내장 번들"
+        oauth_source_text = "Bundled distribution"
     oauth_disabled_attr = "" if OAUTH_UI_ENABLED else "disabled"
+    oauth_section_style = "" if OAUTH_UI_ENABLED else 'style="display:none;"'
     if OAUTH_UI_ENABLED:
-        oauth_setup_connect_html = f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Google 로그인 연결</a>'
+        oauth_setup_connect_html = f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Connect Google sign-in</a>'
     else:
-        oauth_setup_connect_html = '<button type="button" class="btn btn-ghost" disabled>Google 로그인 연결</button>'
+        oauth_setup_connect_html = ""
     send_hour_padded = str(env_map.get("SEND_HOUR", "9")).zfill(2)
     send_minute_padded = str(env_map.get("SEND_MINUTE", "0")).zfill(2)
 
@@ -2435,34 +2467,34 @@ def setup():
     body = f"""
     <div class="page-header">
       <h1>Setup Wizard</h1>
-      <p>처음 1회 기본 설정을 완료하세요. 설정 파일: <code>{html.escape(str(env_path))}</code></p>
+      <p>Complete initial setup once. Settings file: <code>{html.escape(str(env_path))}</code></p>
     </div>
 
     <form method="post">
       <input type="hidden" name="app_token" value="{APP_AUTH_TOKEN}" />
 
       <div class="card">
-        <p class="card-title">1) 이메일/스케줄</p>
-        <p class="small" style="margin:0 0 12px;">Gmail 발송 인증은 <strong>앱 비밀번호</strong> 또는 <strong>Google OAuth</strong> 중 하나만 완료하면 됩니다.</p>
+        <p class="card-title">1) Email / Schedule</p>
+        <p class="small" style="margin:0 0 12px;">For Gmail authentication, complete either <strong>App Password</strong> or <strong>Google OAuth</strong>.</p>
         <div class="settings-grid">
           <div class="settings-row">
-            <div class="settings-label"><strong>Gmail 주소</strong></div>
+            <div class="settings-label"><strong>Gmail address</strong></div>
             <input type="text" name="GMAIL_ADDRESS" value="{esc('GMAIL_ADDRESS')}" placeholder="example@gmail.com" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Gmail 앱 비밀번호</strong><small>16자리, OAuth를 쓸 경우 선택 사항. <a href="https://myaccount.google.com/apppasswords" target="_blank">🔗 발급 바로가기</a>. 빈칸 저장 시 기존값 유지</small></div>
+            <div class="settings-label"><strong>Gmail app password</strong><small>16 characters. Optional if using OAuth. <a href="https://myaccount.google.com/apppasswords" target="_blank">🔗 Get app password</a>. Leave blank to keep the current value</small></div>
             <input type="password" name="GMAIL_APP_PASSWORD" value="" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>수신 이메일</strong></div>
+            <div class="settings-label"><strong>Recipient email</strong></div>
             <input type="text" name="RECIPIENT_EMAIL" value="{esc('RECIPIENT_EMAIL')}" placeholder="recipient@example.com" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>타임존</strong></div>
+            <div class="settings-label"><strong>Timezone</strong></div>
             <input type="text" name="TIMEZONE" value="{esc('TIMEZONE')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>발송 시각</strong></div>
+            <div class="settings-label"><strong>Send time</strong></div>
             <div>
               <input type="time" id="setup_send_time" value="{send_hour_padded}:{send_minute_padded}" onchange="splitSetupTime(this.value)" style="width:140px;" />
               <input type="hidden" name="SEND_HOUR" id="setup_send_hour" value="{esc('SEND_HOUR')}" />
@@ -2470,52 +2502,52 @@ def setup():
             </div>
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>발송 주기</strong><small>SEND_FREQUENCY</small></div>
+            <div class="settings-label"><strong>Send frequency</strong><small>SEND_FREQUENCY</small></div>
             <select name="SEND_FREQUENCY" style="width:160px;">
-              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>매일</option>
-              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>3일마다</option>
-              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>매주(7일)</option>
+              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>Daily</option>
+              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>Every 3 days</option>
+              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>Weekly (7 days)</option>
             </select>
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>주기 기준일</strong><small>SEND_ANCHOR_DATE (YYYY-MM-DD)</small></div>
+            <div class="settings-label"><strong>Frequency anchor date</strong><small>SEND_ANCHOR_DATE (YYYY-MM-DD)</small></div>
             <input type="text" name="SEND_ANCHOR_DATE" value="{esc('SEND_ANCHOR_DATE')}" placeholder="2026-01-01" style="width:160px;" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Send Now 쿨다운(초)</strong><small>권장 300</small></div>
+            <div class="settings-label"><strong>Send Now cooldown (seconds)</strong><small>Recommended: 300</small></div>
             <input type="number" min="0" name="SEND_NOW_COOLDOWN_SECONDS" value="{esc('SEND_NOW_COOLDOWN_SECONDS')}" style="width:140px;" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>중복 발송 보관일</strong><small>sent_ids.json 유지 기간</small></div>
+            <div class="settings-label"><strong>Duplicate suppression retention</strong><small>sent_ids.json retention days</small></div>
             <input type="number" min="1" name="SENT_HISTORY_DAYS" value="{esc('SENT_HISTORY_DAYS')}" style="width:140px;" />
           </div>
         </div>
       </div>
 
       <div class="card">
-        <p class="card-title">2) LLM/API (선택)</p>
-        <p class="small" style="margin:0 0 12px;">API 키가 없어도 키워드 기반 폴백 모드로 동작합니다.</p>
-        <p class="small" style="margin:0 0 12px;">Google OAuth 내장 번들: <strong>{oauth_bundle_ready_text}</strong> (현재 소스: {html.escape(oauth_source_text)})</p>
-        <p class="small" style="margin:0 0 12px;">{'' if OAUTH_UI_ENABLED else '현재 버전에서는 OAuth 설정 UI가 비활성화되어 있습니다. Gmail 앱 비밀번호 방식을 사용하세요.'}</p>
+        <p class="card-title">2) LLM/API (optional)</p>
+        <p class="small" style="margin:0 0 12px;">Works in keyword-only fallback mode even without API keys.</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Bundled Google OAuth client: <strong>{oauth_bundle_ready_text}</strong> (current source: {html.escape(oauth_source_text)})</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>OAuth is currently hidden in the default app-password-first path.</p>
         <div class="settings-grid">
           <div class="settings-row">
-            <div class="settings-label"><strong>LLM 에이전트 사용</strong></div>
+            <div class="settings-label"><strong>Enable LLM agent</strong></div>
             <input type="checkbox" name="ENABLE_LLM_AGENT" {checked_llm} />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Gemini API Key</strong><small><a href="https://aistudio.google.com/" target="_blank">🔗 발급 방법</a></small></div>
+            <div class="settings-label"><strong>Gemini API Key</strong><small><a href="https://aistudio.google.com/" target="_blank">🔗 How to create key</a></small></div>
             <input type="password" name="GEMINI_API_KEY" value="" autocomplete="new-password" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Gemini 모델</strong></div>
+            <div class="settings-label"><strong>Gemini model</strong></div>
             <input type="text" name="GEMINI_MODEL" value="{esc('GEMINI_MODEL')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>요약 출력 언어</strong><small>OUTPUT_LANGUAGE — 예: en, ko, ja, es, fr</small></div>
+            <div class="settings-label"><strong>Summary output language</strong><small>OUTPUT_LANGUAGE — e.g., en, ko, ja, es, fr</small></div>
             <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>고급 추론 사용</strong><small>ENABLE_GEMINI_ADVANCED_REASONING — 체크 시 Gemini 3.1 Pro 강제 사용</small></div>
+            <div class="settings-label"><strong>Enable advanced reasoning</strong><small>ENABLE_GEMINI_ADVANCED_REASONING — force Gemini 3.1 Pro</small></div>
             <input type="checkbox" name="ENABLE_GEMINI_ADVANCED_REASONING" {checked_gemini_advanced} />
           </div>
           <div class="settings-row">
@@ -2523,11 +2555,11 @@ def setup():
             <input type="checkbox" name="ENABLE_CEREBRAS_FALLBACK" {checked_cerebras} />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Cerebras API Key</strong><small><a href="https://cloud.cerebras.ai/" target="_blank">🔗 발급 방법</a></small></div>
+            <div class="settings-label"><strong>Cerebras API Key</strong><small><a href="https://cloud.cerebras.ai/" target="_blank">🔗 How to create key</a></small></div>
             <input type="password" name="CEREBRAS_API_KEY" value="" autocomplete="new-password" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Cerebras 모델</strong></div>
+            <div class="settings-label"><strong>Cerebras model</strong></div>
             <input type="text" name="CEREBRAS_MODEL" value="{esc('CEREBRAS_MODEL')}" />
           </div>
           <div class="settings-row">
@@ -2535,19 +2567,19 @@ def setup():
             <input type="text" name="CEREBRAS_API_BASE" value="{esc('CEREBRAS_API_BASE')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Semantic Scholar 소스 사용</strong></div>
+            <div class="settings-label"><strong>Enable Semantic Scholar source</strong></div>
             <input type="checkbox" name="ENABLE_SEMANTIC_SCHOLAR" {checked_semantic} />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Semantic Scholar API Key</strong><small><a href="https://www.semanticscholar.org/product/api" target="_blank">🔗 발급 방법</a></small></div>
+            <div class="settings-label"><strong>Semantic Scholar API Key</strong><small><a href="https://www.semanticscholar.org/product/api" target="_blank">🔗 How to create key</a></small></div>
             <input type="password" name="SEMANTIC_SCHOLAR_API_KEY" value="" autocomplete="new-password" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Semantic Scholar 쿼리당 최대 결과</strong></div>
+            <div class="settings-label"><strong>Semantic Scholar max results per query</strong></div>
             <input type="number" min="1" max="100" name="SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY" value="{esc('SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:140px;" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Google Scholar 소스 사용</strong><small>SerpAPI 기반</small></div>
+            <div class="settings-label"><strong>Enable Google Scholar source</strong><small>SerpAPI-based</small></div>
             <input type="checkbox" name="ENABLE_GOOGLE_SCHOLAR" {checked_google_scholar} />
           </div>
           <div class="settings-row">
@@ -2555,35 +2587,35 @@ def setup():
             <input type="password" name="GOOGLE_SCHOLAR_API_KEY" value="" autocomplete="new-password" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Google Scholar 쿼리당 최대 결과</strong><small>권장 10~20</small></div>
+            <div class="settings-label"><strong>Google Scholar max results per query</strong><small>Recommended: 10-20</small></div>
             <input type="number" min="1" max="20" name="GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY" value="{esc('GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:140px;" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>NCBI API Key</strong><small>PubMed 처리량 향상(권장)</small></div>
+            <div class="settings-label"><strong>NCBI API key</strong><small>Improves PubMed throughput (recommended)</small></div>
             <input type="text" name="NCBI_API_KEY" value="{esc('NCBI_API_KEY')}" />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>Google OAuth 사용</strong><small>앱 비밀번호 대신 Google 로그인 연동</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Enable Google OAuth</strong><small>Use Google sign-in instead of app password</small></div>
             <input type="checkbox" name="ENABLE_GOOGLE_OAUTH" {checked_google_oauth} {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>OAuth를 Gmail 발송에 사용</strong><small>GOOGLE_OAUTH_USE_FOR_GMAIL</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Use OAuth for Gmail sending</strong><small>GOOGLE_OAUTH_USE_FOR_GMAIL</small></div>
             <input type="checkbox" name="GOOGLE_OAUTH_USE_FOR_GMAIL" {checked_google_oauth_gmail} {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>Google OAuth Client ID</strong><small>Google Cloud OAuth 클라이언트 ID (내장 번들이 있으면 비워도 됨)</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Google OAuth Client ID</strong><small>Google Cloud OAuth client ID (can be blank if bundled client exists)</small></div>
             <input type="text" name="GOOGLE_OAUTH_CLIENT_ID" value="{esc('GOOGLE_OAUTH_CLIENT_ID')}" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>Google OAuth Client Secret</strong><small>내장 번들이 있으면 비워도 됨. 빈칸 저장 시 기존값 유지</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Google OAuth Client Secret</strong><small>Can be blank if bundled client exists. Leave blank to keep current value</small></div>
             <input type="password" name="GOOGLE_OAUTH_CLIENT_SECRET" value="" autocomplete="new-password" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>Google OAuth Redirect URI</strong><small>비우면 현재 로컬 UI 주소 자동 사용</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Google OAuth redirect URI</strong><small>Leave blank to auto-use current local UI callback URL</small></div>
             <input type="text" name="GOOGLE_OAUTH_REDIRECT_URI" value="{esc('GOOGLE_OAUTH_REDIRECT_URI')}" placeholder="http://127.0.0.1:5050/oauth/google/callback" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>연결 상태</strong><small>{html.escape(str(env_map.get('GOOGLE_OAUTH_CONNECTED_EMAIL', '') or '미연결'))}</small></div>
+          <div class="settings-row" {oauth_section_style}>
+            <div class="settings-label"><strong>Connection status</strong><small>{html.escape(str(env_map.get('GOOGLE_OAUTH_CONNECTED_EMAIL', '') or 'Not connected'))}</small></div>
             <div class="button-row">
               {oauth_setup_connect_html}
             </div>
@@ -2592,29 +2624,29 @@ def setup():
       </div>
 
       <div class="card">
-        <p class="card-title">3) 웹 보안 (선택)</p>
+        <p class="card-title">3) Web security (optional)</p>
         <div class="settings-row">
-          <div class="settings-label"><strong>웹 콘솔 비밀번호</strong><small>원격 접근(0.0.0.0) 시 필수</small></div>
+          <div class="settings-label"><strong>Web console password</strong><small>Required for remote access (0.0.0.0)</small></div>
           <input type="password" name="WEB_PASSWORD" value="" autocomplete="new-password" />
         </div>
         <div class="settings-row">
-          <div class="settings-label"><strong>원격 host 허용 (비권장)</strong><small>ALLOW_INSECURE_REMOTE_WEB — HTTPS 미적용 원격 접근을 허용합니다.</small></div>
+          <div class="settings-label"><strong>Allow remote host (not recommended)</strong><small>ALLOW_INSECURE_REMOTE_WEB — allows remote access without HTTPS.</small></div>
           <input type="checkbox" name="ALLOW_INSECURE_REMOTE_WEB" {checked_remote} />
         </div>
         <div class="settings-row">
-          <div class="settings-label"><strong>OS 키체인 저장</strong><small>USE_KEYRING — 비밀값을 OS 보안 저장소에 저장합니다.</small></div>
+          <div class="settings-label"><strong>Store secrets in OS keyring</strong><small>USE_KEYRING — stores secrets in OS secure storage.</small></div>
           <input type="checkbox" name="USE_KEYRING" {checked_keyring} />
         </div>
       </div>
 
       <div class="card">
-        <p class="card-title">4) 연결 진단</p>
-        <button type="button" class="btn-ghost" onclick="runHealthcheck()">연결 진단 실행</button>
-        <pre id="healthcheck-result" style="margin-top:10px; white-space:pre-wrap;">아직 실행하지 않음</pre>
+        <p class="card-title">4) Connectivity checks</p>
+        <button type="button" class="btn-ghost" onclick="runHealthcheck()">Run connectivity checks</button>
+        <pre id="healthcheck-result" style="margin-top:10px; white-space:pre-wrap;">Not run yet</pre>
       </div>
 
       <div class="gap-8">
-        <button type="submit">✅ Setup 완료하고 저장</button>
+        <button type="submit">✅ Save setup</button>
       </div>
     </form>
 
@@ -2627,7 +2659,7 @@ def setup():
 
       async function runHealthcheck() {{
         const box = document.getElementById('healthcheck-result');
-        box.textContent = '진단 중...';
+        box.textContent = 'Running diagnostics...';
         try {{
           const res = await fetch('{url_for("setup_healthcheck")}', {{
             method: 'POST',
@@ -2640,7 +2672,7 @@ def setup():
           const data = await res.json();
           box.textContent = JSON.stringify(data, null, 2);
         }} catch (err) {{
-          box.textContent = '진단 실패';
+          box.textContent = 'Diagnostics failed';
         }}
       }}
     </script>
@@ -2772,21 +2804,19 @@ def settings():
         "checked" if env_truthy(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")) else ""
     )
     oauth_defaults = get_effective_google_oauth_values(env_map)
-    oauth_bundle_ready_text = "있음" if oauth_defaults.get("bundle_ready") else "없음"
-    oauth_source_text = "Settings 입력값"
+    oauth_bundle_ready_text = "Available" if oauth_defaults.get("bundle_ready") else "Not available"
+    oauth_source_text = "Settings values"
     if oauth_defaults.get("using_bundled_client_id") or oauth_defaults.get("using_bundled_client_secret"):
-        oauth_source_text = "배포판 내장 번들"
+        oauth_source_text = "Bundled distribution"
     oauth_disabled_attr = "" if OAUTH_UI_ENABLED else "disabled"
+    oauth_section_style = "" if OAUTH_UI_ENABLED else 'style="display:none;"'
     if OAUTH_UI_ENABLED:
         oauth_settings_controls_html = (
-            f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Google 로그인 연결</a>'
-            '<button type="button" class="btn-danger" onclick="disconnectGoogleOauth()">연결 해제</button>'
+            f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Connect Google sign-in</a>'
+            '<button type="button" class="btn-danger" onclick="disconnectGoogleOauth()">Disconnect</button>'
         )
     else:
-        oauth_settings_controls_html = (
-            '<button type="button" class="btn btn-ghost" disabled>Google 로그인 연결</button>'
-            '<button type="button" class="btn-danger" disabled>연결 해제</button>'
-        )
+        oauth_settings_controls_html = ""
     send_hour_padded = str(env_map.get("SEND_HOUR", "9")).zfill(2)
     send_minute_padded = str(env_map.get("SEND_MINUTE", "0")).zfill(2)
 
@@ -2799,7 +2829,7 @@ def settings():
         rows = "".join(f"<li>{html.escape(item)}</li>" for item in warning_items)
         warnings_html = f"""
         <div class="card" style="border-color:#f59e0b;background:#fffbeb;">
-          <p class="card-title" style="color:#92400e;">⚠️ 운영 경고</p>
+          <p class="card-title" style="color:#92400e;">⚠️ Operational Warning</p>
           <ul style="margin:0;padding-left:18px;color:#92400e;line-height:1.7;">{rows}</ul>
         </div>
         """
@@ -2807,8 +2837,8 @@ def settings():
     body = f"""
     <div class="page-header">
       <h1>Settings</h1>
-      <p>설정 파일 위치: <code>{html.escape(str(env_path))}</code></p>
-      <p class="small">외부 접근(`--host 0.0.0.0`)은 기본 차단됩니다. 테스트 목적일 때만 `ALLOW_INSECURE_REMOTE_WEB=true` + `WEB_PASSWORD`를 사용하세요.</p>
+      <p>Settings file path: <code>{html.escape(str(env_path))}</code></p>
+      <p class="small">Remote access (`--host 0.0.0.0`) is blocked by default. Enable only for testing with `ALLOW_INSECURE_REMOTE_WEB=true` and `WEB_PASSWORD`.</p>
     </div>
     {warnings_html}
 
@@ -2816,91 +2846,91 @@ def settings():
       <input type="hidden" name="app_token" value="{APP_AUTH_TOKEN}" />
 
       <div class="card">
-        <p class="card-title">📧 이메일 설정</p>
-        <p class="small" style="margin:0 0 12px;">Google OAuth 내장 번들: <strong>{oauth_bundle_ready_text}</strong> (현재 소스: {html.escape(oauth_source_text)})</p>
-        <p class="small" style="margin:0 0 12px;">{'' if OAUTH_UI_ENABLED else '현재 버전에서는 OAuth 설정 UI가 비활성화되어 있습니다. Gmail 앱 비밀번호 방식을 사용하세요.'}</p>
+        <p class="card-title">📧 Email Settings</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Bundled Google OAuth client: <strong>{oauth_bundle_ready_text}</strong> (Current source: {html.escape(oauth_source_text)})</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>OAuth is currently hidden in the default app-password-first path.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
-              <strong>발신 Gmail 주소</strong>
+              <strong>Sender Gmail Address</strong>
               <small>GMAIL_ADDRESS</small>
             </div>
             <input type="text" name="GMAIL_ADDRESS" value="{esc('GMAIL_ADDRESS')}" placeholder="example@gmail.com" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Gmail 앱 비밀번호</strong>
-              <small>Google 앱 비밀번호 16자리. OAuth를 쓰면 선택 사항입니다. <a href="https://myaccount.google.com/apppasswords" target="_blank">🔗 발급 방법</a>. 빈칸 저장 시 기존값 유지.</small>
+              <strong>Gmail App Password</strong>
+              <small>Google app password (16 chars). Optional when OAuth is enabled. <a href="https://myaccount.google.com/apppasswords" target="_blank">🔗 How to create</a>. Leave blank to keep current value.</small>
             </div>
             <input type="password" name="GMAIL_APP_PASSWORD" value="" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>수신 이메일</strong>
-              <small>RECIPIENT_EMAIL — 리포트를 받을 주소</small>
+              <strong>Recipient Email</strong>
+              <small>RECIPIENT_EMAIL — destination email for digest reports</small>
             </div>
             <input type="text" name="RECIPIENT_EMAIL" value="{esc('RECIPIENT_EMAIL')}" placeholder="recipient@example.com" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>웹 콘솔 비밀번호</strong>
-              <small>WEB_PASSWORD — 외부 접근(0.0.0.0) 시 필수, 빈칸 저장 시 기존값 유지</small>
+              <strong>Web Console Password</strong>
+              <small>WEB_PASSWORD — required for remote access (0.0.0.0). Leave blank to keep current value</small>
             </div>
-            <input type="password" name="WEB_PASSWORD" value="" placeholder="웹 콘솔 로그인 비밀번호" autocomplete="new-password" />
+            <input type="password" name="WEB_PASSWORD" value="" placeholder="Web console login password" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>원격 host 허용 (비권장)</strong>
-              <small>ALLOW_INSECURE_REMOTE_WEB — HTTPS 없는 원격 접근을 허용합니다.</small>
+              <strong>Allow Remote Host (Not Recommended)</strong>
+              <small>ALLOW_INSECURE_REMOTE_WEB — allows remote access without HTTPS.</small>
             </div>
             <input type="checkbox" name="ALLOW_INSECURE_REMOTE_WEB" {remote_checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>OS 키체인 저장</strong>
-              <small>USE_KEYRING — 비밀값을 OS 보안 저장소에 저장</small>
+              <strong>Store Secrets in OS Keyring</strong>
+              <small>USE_KEYRING — stores secrets in OS secure storage</small>
             </div>
             <input type="checkbox" name="USE_KEYRING" {keyring_checked} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
-              <strong>Google OAuth 사용</strong>
-              <small>ENABLE_GOOGLE_OAUTH — 앱 비밀번호 없이 Gmail 연동</small>
+              <strong>Enable Google OAuth</strong>
+              <small>ENABLE_GOOGLE_OAUTH — connect Gmail without app password</small>
             </div>
             <input type="checkbox" name="ENABLE_GOOGLE_OAUTH" {google_oauth_checked} {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
-              <strong>OAuth를 Gmail 발송에 사용</strong>
+              <strong>Use OAuth for Gmail Sending</strong>
               <small>GOOGLE_OAUTH_USE_FOR_GMAIL</small>
             </div>
             <input type="checkbox" name="GOOGLE_OAUTH_USE_FOR_GMAIL" {google_oauth_gmail_checked} {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
               <strong>Google OAuth Client ID</strong>
-              <small>GOOGLE_OAUTH_CLIENT_ID (내장 번들이 있으면 비워도 동작)</small>
+              <small>GOOGLE_OAUTH_CLIENT_ID (can be blank if bundled client is present)</small>
             </div>
             <input type="text" name="GOOGLE_OAUTH_CLIENT_ID" value="{esc('GOOGLE_OAUTH_CLIENT_ID')}" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
               <strong>Google OAuth Client Secret</strong>
-              <small>GOOGLE_OAUTH_CLIENT_SECRET — 내장 번들이 있으면 비워도 동작. 빈칸 저장 시 기존값 유지</small>
+              <small>GOOGLE_OAUTH_CLIENT_SECRET — can be blank if bundled client is present. Leave blank to keep current value</small>
             </div>
             <input type="password" name="GOOGLE_OAUTH_CLIENT_SECRET" value="" autocomplete="new-password" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
-              <strong>Google OAuth Redirect URI</strong>
-              <small>GOOGLE_OAUTH_REDIRECT_URI — 비우면 현재 로컬 UI 주소 자동 사용</small>
+              <strong>Google OAuth redirect URI</strong>
+              <small>GOOGLE_OAUTH_REDIRECT_URI — leave blank to auto-use current local UI URL</small>
             </div>
             <input type="text" name="GOOGLE_OAUTH_REDIRECT_URI" value="{esc('GOOGLE_OAUTH_REDIRECT_URI')}" placeholder="http://127.0.0.1:5050/oauth/google/callback" {oauth_disabled_attr} />
           </div>
-          <div class="settings-row">
+          <div class="settings-row" {oauth_section_style}>
             <div class="settings-label">
-              <strong>Google 연동 계정</strong>
-              <small>{html.escape(str(env_map.get('GOOGLE_OAUTH_CONNECTED_EMAIL', '') or '미연결'))}</small>
+              <strong>Connected Google Account</strong>
+              <small>{html.escape(str(env_map.get('GOOGLE_OAUTH_CONNECTED_EMAIL', '') or 'Not connected'))}</small>
             </div>
             <div class="button-row">
               {oauth_settings_controls_html}
@@ -2910,19 +2940,19 @@ def settings():
       </div>
 
       <div class="card">
-        <p class="card-title">⏰ 발송 스케줄</p>
+        <p class="card-title">⏰ Delivery Schedule</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
-              <strong>타임존</strong>
-              <small>TIMEZONE — 예: Asia/Seoul</small>
+              <strong>Timezone</strong>
+              <small>TIMEZONE — example: America/New_York</small>
             </div>
             <input type="text" name="TIMEZONE" value="{esc('TIMEZONE')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>발송 시각</strong>
-              <small>매일 논문 리포트를 보내는 시각</small>
+              <strong>Send Time</strong>
+              <small>Local send time for your daily digest</small>
             </div>
             <div>
               <input type="time" id="send_time_picker" value="{send_hour_padded}:{send_minute_padded}" onchange="splitTime(this.value)" style="width:140px;" />
@@ -2932,18 +2962,18 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>발송 주기</strong>
+              <strong>Send Frequency</strong>
               <small>SEND_FREQUENCY — daily / every_3_days / weekly</small>
             </div>
             <select name="SEND_FREQUENCY" style="width:180px;">
-              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>매일</option>
-              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>3일마다</option>
-              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>매주(7일)</option>
+              <option value="daily" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "daily" else ""}>Daily</option>
+              <option value="every_3_days" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "every_3_days" else ""}>Every 3 days</option>
+              <option value="weekly" {"selected" if env_map.get("SEND_FREQUENCY", "daily") == "weekly" else ""}>Weekly (7 days)</option>
             </select>
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>주기 기준일</strong>
+              <strong>Frequency Anchor Date</strong>
               <small>SEND_ANCHOR_DATE — YYYY-MM-DD</small>
             </div>
             <input type="text" name="SEND_ANCHOR_DATE" value="{esc('SEND_ANCHOR_DATE')}" placeholder="2026-01-01" style="width:160px;" />
@@ -2952,89 +2982,89 @@ def settings():
       </div>
 
       <div class="card">
-        <p class="card-title">🔍 검색 파라미터</p>
+        <p class="card-title">🔍 Search Parameters</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
-              <strong>탐색 기간 (시간)</strong>
-              <small>LOOKBACK_HOURS — 최근 몇 시간 이내 논문 수집</small>
+              <strong>Lookback Window (Hours)</strong>
+              <small>LOOKBACK_HOURS — collect papers within the last N hours</small>
             </div>
             <input type="number" name="LOOKBACK_HOURS" min="1" value="{esc('LOOKBACK_HOURS')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>최대 논문 수</strong>
-              <small>MAX_PAPERS — 리포트에 포함할 최대 논문 수</small>
+              <strong>Max Papers</strong>
+              <small>MAX_PAPERS — max papers included in each digest</small>
             </div>
             <input type="number" name="MAX_PAPERS" min="1" value="{esc('MAX_PAPERS')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>최소 관련성 점수</strong>
-              <small>MIN_RELEVANCE_SCORE — LLM 미사용 시 키워드 점수 필터</small>
+              <strong>Minimum Relevance Score</strong>
+              <small>MIN_RELEVANCE_SCORE — keyword-score filter when LLM is disabled</small>
             </div>
             <input type="text" name="MIN_RELEVANCE_SCORE" value="{esc('MIN_RELEVANCE_SCORE')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>arXiv 쿼리당 최대 결과</strong>
+              <strong>Max Results per arXiv Query</strong>
               <small>ARXIV_MAX_RESULTS_PER_QUERY</small>
             </div>
             <input type="number" name="ARXIV_MAX_RESULTS_PER_QUERY" min="1" value="{esc('ARXIV_MAX_RESULTS_PER_QUERY')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>PubMed 쿼리당 최대 결과</strong>
+              <strong>Max Results per PubMed Query</strong>
               <small>PUBMED_MAX_IDS_PER_QUERY</small>
             </div>
             <input type="number" name="PUBMED_MAX_IDS_PER_QUERY" min="1" value="{esc('PUBMED_MAX_IDS_PER_QUERY')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Semantic Scholar 소스 사용</strong>
+              <strong>Enable Semantic Scholar Source</strong>
               <small>ENABLE_SEMANTIC_SCHOLAR</small>
             </div>
             <input type="checkbox" name="ENABLE_SEMANTIC_SCHOLAR" {semantic_checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Google Scholar 소스 사용</strong>
-              <small>ENABLE_GOOGLE_SCHOLAR (SerpAPI 기반)</small>
+              <strong>Enable Google Scholar Source</strong>
+              <small>ENABLE_GOOGLE_SCHOLAR (SerpAPI based)</small>
             </div>
             <input type="checkbox" name="ENABLE_GOOGLE_SCHOLAR" {google_scholar_checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Semantic Scholar 쿼리당 최대 결과</strong>
+              <strong>Max Results per Semantic Scholar Query</strong>
               <small>SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY</small>
             </div>
             <input type="number" name="SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY" min="1" max="100" value="{esc('SEMANTIC_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Google Scholar 쿼리당 최대 결과</strong>
-              <small>GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY (권장 10~20)</small>
+              <strong>Max Results per Google Scholar Query</strong>
+              <small>GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY (recommended: 10-20)</small>
             </div>
             <input type="number" name="GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY" min="1" max="20" value="{esc('GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>소스당 최대 검색 쿼리 수</strong>
+              <strong>Max Search Queries per Source</strong>
               <small>MAX_SEARCH_QUERIES_PER_SOURCE</small>
             </div>
             <input type="number" name="MAX_SEARCH_QUERIES_PER_SOURCE" min="1" value="{esc('MAX_SEARCH_QUERIES_PER_SOURCE')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Send Now 쿨다운(초)</strong>
-              <small>SEND_NOW_COOLDOWN_SECONDS — 수동 발송 연속 호출 방지</small>
+              <strong>Send Now Cooldown (seconds)</strong>
+              <small>SEND_NOW_COOLDOWN_SECONDS — prevents repeated manual sends</small>
             </div>
             <input type="number" name="SEND_NOW_COOLDOWN_SECONDS" min="0" value="{esc('SEND_NOW_COOLDOWN_SECONDS')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>중복 발송 보관일</strong>
-              <small>SENT_HISTORY_DAYS — 이미 보낸 논문 ID를 제외하는 기간</small>
+              <strong>Duplicate-Send Retention Days</strong>
+              <small>SENT_HISTORY_DAYS — suppress already-sent paper IDs for this many days</small>
             </div>
             <input type="number" name="SENT_HISTORY_DAYS" min="1" value="{esc('SENT_HISTORY_DAYS')}" style="width:120px;" />
           </div>
@@ -3042,111 +3072,111 @@ def settings():
       </div>
 
       <div class="card">
-        <p class="card-title">🤖 LLM / Gemini / Cerebras 설정</p>
-        <p class="small" style="margin:0 0 12px;">API 키가 없거나 LLM 실패 시 키워드 기반 폴백 모드로 동작합니다.</p>
+        <p class="card-title">🤖 LLM / Gemini / Cerebras Settings</p>
+        <p class="small" style="margin:0 0 12px;">Runs in keyword-based fallback mode when API keys are missing or LLM calls fail.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
-              <strong>LLM 에이전트 사용</strong>
-              <small>ENABLE_LLM_AGENT — LLM으로 관련성 자동 평가</small>
+              <strong>Enable LLM Agent</strong>
+              <small>ENABLE_LLM_AGENT — automatic relevance scoring via LLM</small>
             </div>
             <input type="checkbox" name="ENABLE_LLM_AGENT" {checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Gemini API Key</strong>
-              <small><a href="https://aistudio.google.com/" target="_blank">🔗 발급 방법</a>. 빈칸 저장 시 기존값 유지</small>
+              <small><a href="https://aistudio.google.com/" target="_blank">🔗 How to create</a>. Leave blank to keep current value.</small>
             </div>
-            <input type="password" name="GEMINI_API_KEY" value="" placeholder="AI Studio에서 발급받은 키" autocomplete="new-password" />
+            <input type="password" name="GEMINI_API_KEY" value="" placeholder="Key generated from AI Studio" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Gemini 모델</strong>
-              <small>GEMINI_MODEL — 기본값 gemini-3.1-flash</small>
+              <strong>Gemini Model</strong>
+              <small>GEMINI_MODEL — default: gemini-3.1-flash</small>
             </div>
             <input type="text" name="GEMINI_MODEL" value="{esc('GEMINI_MODEL')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>요약 출력 언어</strong>
-              <small>OUTPUT_LANGUAGE — 예: en, ko, ja, es, fr</small>
+              <strong>Summary Output Language</strong>
+              <small>OUTPUT_LANGUAGE — e.g., en, ko, ja, es, fr</small>
             </div>
             <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" style="width:140px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>고급 추론 사용</strong>
-              <small>ENABLE_GEMINI_ADVANCED_REASONING — 체크 시 Gemini 3.1 Pro를 사용</small>
+              <strong>Enable Advanced Reasoning</strong>
+              <small>ENABLE_GEMINI_ADVANCED_REASONING — use Gemini 3.1 Pro when enabled</small>
             </div>
             <input type="checkbox" name="ENABLE_GEMINI_ADVANCED_REASONING" {gemini_advanced_checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Cerebras fallback 사용</strong>
-              <small>ENABLE_CEREBRAS_FALLBACK — Gemini 실패 시 자동 백업 호출</small>
+              <strong>Enable Cerebras Fallback</strong>
+              <small>ENABLE_CEREBRAS_FALLBACK — auto fallback when Gemini fails</small>
             </div>
             <input type="checkbox" name="ENABLE_CEREBRAS_FALLBACK" {cerebras_checked} />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Cerebras API Key</strong>
-              <small><a href="https://cloud.cerebras.ai/" target="_blank">🔗 발급 방법</a>. 빈칸 저장 시 기존값 유지</small>
+              <small><a href="https://cloud.cerebras.ai/" target="_blank">🔗 How to create</a>. Leave blank to keep current value.</small>
             </div>
-            <input type="password" name="CEREBRAS_API_KEY" value="" placeholder="Cerebras API 키" autocomplete="new-password" />
+            <input type="password" name="CEREBRAS_API_KEY" value="" placeholder="Cerebras API Key" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Cerebras 모델</strong>
-              <small>CEREBRAS_MODEL — 예: gpt-oss-120b</small>
+              <strong>Cerebras Model</strong>
+              <small>CEREBRAS_MODEL — e.g., gpt-oss-120b</small>
             </div>
             <input type="text" name="CEREBRAS_MODEL" value="{esc('CEREBRAS_MODEL')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Cerebras API Base</strong>
-              <small>CEREBRAS_API_BASE — 기본값 권장 유지</small>
+              <small>CEREBRAS_API_BASE — keep default unless needed</small>
             </div>
             <input type="text" name="CEREBRAS_API_BASE" value="{esc('CEREBRAS_API_BASE')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Semantic Scholar API Key</strong>
-              <small><a href="https://www.semanticscholar.org/product/api" target="_blank">🔗 발급 방법</a>. 빈칸 저장 시 기존값 유지</small>
+              <small><a href="https://www.semanticscholar.org/product/api" target="_blank">🔗 How to create</a>. Leave blank to keep current value.</small>
             </div>
-            <input type="password" name="SEMANTIC_SCHOLAR_API_KEY" value="" placeholder="Semantic Scholar API 키" autocomplete="new-password" />
+            <input type="password" name="SEMANTIC_SCHOLAR_API_KEY" value="" placeholder="Semantic Scholar API Key" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Google Scholar API Key</strong>
-              <small><a href="https://serpapi.com/" target="_blank">🔗 SerpAPI 발급</a>. 빈칸 저장 시 기존값 유지</small>
+              <small><a href="https://serpapi.com/" target="_blank">🔗 SerpAPI</a>. Leave blank to keep current value.</small>
             </div>
-            <input type="password" name="GOOGLE_SCHOLAR_API_KEY" value="" placeholder="SerpAPI 키" autocomplete="new-password" />
+            <input type="password" name="GOOGLE_SCHOLAR_API_KEY" value="" placeholder="SerpAPI Key" autocomplete="new-password" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Gemini 최대 논문 수</strong>
+              <strong>Gemini Max Papers</strong>
               <small>GEMINI_MAX_PAPERS</small>
             </div>
             <input type="number" name="GEMINI_MAX_PAPERS" min="1" value="{esc('GEMINI_MAX_PAPERS')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>LLM 관련성 임계점</strong>
-              <small>LLM_RELEVANCE_THRESHOLD — 이 점수 이상만 리포트 포함</small>
+              <strong>LLM Relevance Threshold</strong>
+              <small>LLM_RELEVANCE_THRESHOLD — include papers at or above this score</small>
             </div>
             <input type="number" step="0.1" name="LLM_RELEVANCE_THRESHOLD" min="1" max="10" value="{esc('LLM_RELEVANCE_THRESHOLD')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>LLM 배치 크기</strong>
+              <strong>LLM Batch Size</strong>
               <small>LLM_BATCH_SIZE</small>
             </div>
             <input type="number" name="LLM_BATCH_SIZE" min="1" value="{esc('LLM_BATCH_SIZE')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>LLM 최대 후보 수</strong>
-              <small>LLM_MAX_CANDIDATES — 기본 30, 최대 80 (3일/주간 주기에서는 비선형 확장 적용)</small>
+              <strong>LLM Max Candidates</strong>
+              <small>LLM_MAX_CANDIDATES — default 30, max 80 (nonlinear expansion for longer frequencies)</small>
             </div>
             <input type="number" name="LLM_MAX_CANDIDATES" min="1" max="80" value="{esc('LLM_MAX_CANDIDATES')}" style="width:120px;" />
           </div>
@@ -3154,18 +3184,18 @@ def settings():
       </div>
 
       <div class="card">
-        <p class="card-title">📁 기타</p>
+        <p class="card-title">📁 Misc</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
-              <strong>NCBI API Key</strong>
-              <small>NCBI_API_KEY — PubMed 처리량 안정화에 권장</small>
+              <strong>NCBI API key</strong>
+              <small>NCBI_API_KEY — recommended to stabilize PubMed throughput</small>
             </div>
             <input type="text" name="NCBI_API_KEY" value="{esc('NCBI_API_KEY')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Topics 파일 경로</strong>
+              <strong>Topics File Path</strong>
               <small>USER_TOPICS_FILE</small>
             </div>
             <input type="text" name="USER_TOPICS_FILE" value="{esc('USER_TOPICS_FILE')}" />
@@ -3174,8 +3204,8 @@ def settings():
       </div>
 
       <div class="gap-8" style="padding:4px 0 8px;">
-        <button type="submit">💾 저장</button>
-        <span class="small">저장 후 스케줄러가 자동으로 재시작됩니다.</span>
+        <button type="submit">💾 Save</button>
+        <span class="small">Scheduler auto-reloads after save.</span>
       </div>
     </form>
 
@@ -3187,13 +3217,13 @@ def settings():
       }}
 
       async function disconnectGoogleOauth() {{
-        if (!confirm('Google OAuth 연결을 해제할까요?')) return;
+        if (!confirm('Disconnect Google OAuth?')) return;
         const res = await fetch('{url_for("google_oauth_disconnect")}', {{
           method: 'POST',
           headers: {{ 'X-App-Token': window.APP_TOKEN || '' }},
         }});
         if (!res.ok) {{
-          alert('연결 해제 실패');
+          alert('Failed to disconnect');
           return;
         }}
         window.location.reload();
@@ -3212,9 +3242,9 @@ def topics():
     body = """
     <div class="page-header">
       <h1>Topic Editor</h1>
-      <p>프로젝트 컨텍스트를 입력한 뒤 <b>Keyword / Query 생성</b> 버튼으로 키워드/쿼리 초안을 만들고, 수동 수정 후 저장하세요.</p>
-      <p class="small" style="margin-top:4px;">저장된 쿼리는 매일 실행 시 그대로 사용됩니다. (자동 재생성되지 않음)</p>
-      <p class="small" style="margin-top:4px;">현재 파일: <code>__TOPICS_PATH__</code></p>
+      <p>Enter project context, click <b>Generate Keyword / Query</b>, then review and save.</p>
+      <p class="small" style="margin-top:4px;">Saved queries are reused in daily runs as-is. (No automatic regeneration)</p>
+      <p class="small" style="margin-top:4px;">Current file: <code>__TOPICS_PATH__</code></p>
     </div>
 
     <div class="card">
@@ -3229,7 +3259,7 @@ def topics():
     <div class="card">
       <h3>2) Topics / Queries</h3>
       <div class="button-row" style="margin-bottom:10px;">
-        <button type="button" id="btn-generate" class="btn-success" onclick="generateTopics()">Keyword / Query 생성</button>
+        <button type="button" id="btn-generate" class="btn-success" onclick="generateTopics()">Generate Keyword / Query</button>
         <span id="generate-status" class="small"></span>
       </div>
       <table>
@@ -3255,7 +3285,7 @@ def topics():
       <button type="button" onclick="if (preparePayloadBeforeSave()) document.getElementById('topics-save-form').submit();">
         💾 Save Topics
       </button>
-      <span class="small">저장 후 화면이 새로고침됩니다.</span>
+      <span class="small">Page reloads after save.</span>
     </div>
     <form id="topics-save-form" method="post" action="__TOPICS_SAVE_URL__">
       <input type="hidden" name="app_token" value="__APP_TOKEN__" />
@@ -3364,7 +3394,7 @@ def topics():
       async function generateTopics() {
         const projectsPayload = normalizedProjects();
         if (projectsPayload.length === 0) {
-          alert('먼저 프로젝트를 입력하세요.');
+          alert('Please add at least one project first.');
           return;
         }
 
@@ -3372,8 +3402,8 @@ def topics():
         const status = document.getElementById('generate-status');
         const originalLabel = btn.textContent;
         btn.disabled = true;
-        btn.textContent = '🔄 생성 중...';
-        status.innerText = 'LLM으로 keyword/query 생성 중...';
+        btn.textContent = '🔄 Generating...';
+        status.innerText = 'Generating keyword/query with LLM...';
 
         try {
           const res = await fetch('__TOPICS_GENERATE_URL__', {
@@ -3390,9 +3420,9 @@ def topics():
           }
           topics = Array.isArray(data.topics) ? data.topics : [];
           renderTopics();
-          status.innerText = `생성 완료: ${topics.length}개 topic`;
+          status.innerText = `Generated: ${topics.length} topics`;
         } catch (err) {
-          status.innerText = '생성 실패';
+          status.innerText = 'Generation failed';
           alert(err.message || 'Generation failed');
         } finally {
           btn.disabled = false;
@@ -3406,7 +3436,7 @@ def topics():
           topics: normalizedTopics(),
         };
         if (payload.projects.length === 0 && payload.topics.length === 0) {
-          alert('projects 또는 topics 중 하나는 입력해야 합니다.');
+          alert('At least one of projects or topics is required.');
           return false;
         }
         document.getElementById('payload_json').value = JSON.stringify(payload, null, 2);
@@ -3512,17 +3542,28 @@ def topics_generate():
 
 @app.route("/manual", methods=["GET"])
 def manual():
+    ui_language = get_ui_language()
+    preferred_manual = "MANUAL_KR.md" if ui_language == "ko" else "MANUAL_EN.md"
+    fallback_manual = "MANUAL_EN.md" if preferred_manual == "MANUAL_KR.md" else "MANUAL_KR.md"
     manual_candidates = [
-        (get_runtime_base_dir() / "docs" / "manuals" / "MANUAL_KR.md").resolve(),
-        (Path("docs") / "manuals" / "MANUAL_KR.md").resolve(),
-        (get_runtime_base_dir() / "MANUAL_KR.md").resolve(),
-        Path("MANUAL_KR.md").resolve(),
+        (get_runtime_base_dir() / "docs" / "manuals" / preferred_manual).resolve(),
+        (Path("docs") / "manuals" / preferred_manual).resolve(),
+        (get_runtime_base_dir() / preferred_manual).resolve(),
+        Path(preferred_manual).resolve(),
+        (get_runtime_base_dir() / "docs" / "manuals" / fallback_manual).resolve(),
+        (Path("docs") / "manuals" / fallback_manual).resolve(),
+        (get_runtime_base_dir() / fallback_manual).resolve(),
+        Path(fallback_manual).resolve(),
     ]
     manual_path = next((candidate for candidate in manual_candidates if candidate.exists()), None)
     if manual_path is None:
         return render_page(
             "Manual",
-            '<div class="card"><h2>Manual</h2><p class="text-danger">MANUAL_KR.md 파일을 찾을 수 없습니다. (docs/manuals/MANUAL_KR.md)</p></div>',
+            (
+                '<div class="card"><h2>Manual</h2>'
+                '<p class="text-danger">Manual file not found. '
+                '(docs/manuals/MANUAL_EN.md or docs/manuals/MANUAL_KR.md)</p></div>'
+            ),
             active_page="manual",
         )
 
@@ -3539,7 +3580,7 @@ def manual():
     body = f"""
     <div class="page-header">
       <h1>📖 Manual</h1>
-      <p>Paper Morning 사용 방법 가이드</p>
+      <p>Paper Morning usage guide</p>
     </div>
     <div class="card md-body">
       {rendered_html}
@@ -3558,7 +3599,7 @@ def license_page():
     if not license_path:
         return render_page(
             "License",
-            '<div class="card"><h2>License</h2><p class="text-danger">LICENSE 파일을 찾을 수 없습니다.</p></div>',
+            '<div class="card"><h2>License</h2><p class="text-danger">LICENSE file not found.</p></div>',
             active_page="license",
         )
 
@@ -3566,10 +3607,10 @@ def license_page():
     body = f"""
     <div class="page-header">
       <h1>⚖️ License</h1>
-      <p>현재 라이선스: GNU AGPLv3</p>
+      <p>Current license: GNU AGPLv3</p>
     </div>
     <div class="card">
-      <p class="small" style="margin-top:0;">문의가 필요하면 <a href="mailto:nineclas@gmail.com">nineclas@gmail.com</a> 으로 메일 주세요.</p>
+      <p class="small" style="margin-top:0;">For licensing questions, contact <a href="mailto:nineclas@gmail.com">nineclas@gmail.com</a>.</p>
       <pre style="white-space:pre-wrap; word-break:break-word; margin:0;">{html.escape(license_text)}</pre>
     </div>
     """
@@ -3601,20 +3642,20 @@ def logs_page():
     body = f"""
     <div class="page-header">
       <h1>Logs</h1>
-      <p>실행 로그를 확인합니다. 파일: <code id="log-path">-</code></p>
+      <p>View runtime logs. File: <code id="log-path">-</code></p>
     </div>
 
     <div class="card">
       <div class="button-row" style="margin-bottom:10px;">
         <label class="small" style="display:flex; align-items:center; gap:6px;">
-          표시 줄 수
+          Lines
           <input id="log-lines" type="number" min="50" max="2000" step="50" value="400" style="width:90px;" />
         </label>
-        <button type="button" onclick="loadLogs()">새로고침</button>
-        <button type="button" class="btn-ghost" id="btn-auto" onclick="toggleAuto()">자동 새로고침: OFF</button>
+        <button type="button" onclick="loadLogs()">Refresh</button>
+        <button type="button" class="btn-ghost" id="btn-auto" onclick="toggleAuto()">Auto refresh: OFF</button>
         <span id="log-meta" class="small"></span>
       </div>
-      <pre id="log-viewer" style="max-height:600px;">로딩 중...</pre>
+      <pre id="log-viewer" style="max-height:600px;">Loading...</pre>
     </div>
 
     <script>
@@ -3636,11 +3677,11 @@ def logs_page():
         if (autoTimer) {{
           clearInterval(autoTimer);
           autoTimer = null;
-          btn.innerText = '자동 새로고침: OFF';
+          btn.innerText = 'Auto refresh: OFF';
           return;
         }}
         autoTimer = setInterval(loadLogs, 5000);
-        btn.innerText = '자동 새로고침: ON (5s)';
+        btn.innerText = 'Auto refresh: ON (5s)';
         loadLogs();
       }}
 
@@ -3679,3 +3720,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

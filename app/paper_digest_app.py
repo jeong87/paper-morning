@@ -11,7 +11,7 @@ import stat
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from logging.handlers import RotatingFileHandler
@@ -102,9 +102,9 @@ class Paper:
     score: float = 0.0
     topic: str = ""
     matched_keywords: List[str] = None
-    llm_relevance_ko: str = ""
-    llm_core_point_ko: str = ""
-    llm_usefulness_ko: str = ""
+    llm_relevance_text: str = ""
+    llm_core_point_text: str = ""
+    llm_usefulness_text: str = ""
 
 
 @dataclass
@@ -120,6 +120,7 @@ class AppConfig:
     timezone_name: str
     send_hour: int
     send_minute: int
+    send_time_window_minutes: int
     max_papers: int
     lookback_hours: int
     min_relevance_score: float
@@ -186,6 +187,8 @@ class DigestStats:
     llm_max_candidates_base: int = 0
     llm_max_candidates_effective: int = 0
     zero_candidate_recovery_steps: List[str] = field(default_factory=list)
+    llm_agent_enabled: bool = False
+    llm_provider_ready: bool = False
 
 
 def mask_sensitive_text(text: str, extra_values: List[str] | None = None) -> str:
@@ -577,6 +580,10 @@ def get_sent_history_path() -> Path:
     return (get_default_data_dir() / "sent_ids.json").resolve()
 
 
+def get_scheduled_send_lock_path() -> Path:
+    return (get_default_data_dir() / "last_scheduled_send_local_date.json").resolve()
+
+
 def parse_iso_datetime(raw: str) -> datetime | None:
     value = clean_text(raw)
     if not value:
@@ -612,6 +619,67 @@ def save_sent_history(path: Path, history: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     enforce_private_file_permissions(path)
+
+
+def load_scheduled_send_lock(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "local_date": clean_text(str(payload.get("local_date", ""))),
+        "sent_at_utc": clean_text(str(payload.get("sent_at_utc", ""))),
+        "timezone": clean_text(str(payload.get("timezone", ""))),
+    }
+
+
+def save_scheduled_send_lock(path: Path, local_date: str, sent_at_utc: datetime, timezone_name: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "local_date": clean_text(local_date),
+        "sent_at_utc": sent_at_utc.astimezone(timezone.utc).isoformat(),
+        "timezone": clean_text(timezone_name),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    enforce_private_file_permissions(path)
+
+
+def should_send_now(config: AppConfig, now_utc: datetime) -> Tuple[bool, str, date]:
+    local_now = now_utc.astimezone(config.timezone)
+    local_date = local_now.date()
+    scheduled_local = local_now.replace(
+        hour=config.send_hour,
+        minute=config.send_minute,
+        second=0,
+        microsecond=0,
+    )
+    distance_minutes = abs((local_now - scheduled_local).total_seconds()) / 60.0
+    window = max(1, config.send_time_window_minutes)
+    if distance_minutes > window:
+        return (
+            False,
+            (
+                f"Outside send window ({window}m). "
+                f"Now={local_now:%H:%M}, target={config.send_hour:02d}:{config.send_minute:02d} "
+                f"({config.timezone_name})"
+            ),
+            local_date,
+        )
+
+    lock_path = get_scheduled_send_lock_path()
+    lock = load_scheduled_send_lock(lock_path)
+    if lock.get("local_date") == local_date.isoformat() and lock.get("timezone") == config.timezone_name:
+        return (
+            False,
+            f"Already sent for local date {local_date.isoformat()} ({config.timezone_name}).",
+            local_date,
+        )
+
+    return True, "Within configured send window.", local_date
 
 
 def filter_already_sent_papers(
@@ -1745,13 +1813,13 @@ def annotate_papers_with_llm(
             except (TypeError, ValueError):
                 score = 0.0
             paper.score = max(0.0, min(10.0, score))
-            paper.llm_relevance_ko = clean_text(
+            paper.llm_relevance_text = clean_text(
                 str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
             )
-            paper.llm_core_point_ko = clean_text(
+            paper.llm_core_point_text = clean_text(
                 str(item.get("core_point", item.get("core_point_ko", "")))
             )
-            paper.llm_usefulness_ko = clean_text(
+            paper.llm_usefulness_text = clean_text(
                 str(item.get("usefulness", item.get("usefulness_ko", "")))
             )
             paper.topic = "LLM-Relevance"
@@ -1877,6 +1945,12 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         f"Send cadence: {stats.send_frequency}",
         f"Lookback window: last {stats.lookback_hours}h",
     ]
+    if not stats.llm_agent_enabled:
+        lines.append("LLM ranking: disabled (ENABLE_LLM_AGENT=false)")
+    elif not stats.llm_provider_ready:
+        lines.append("LLM ranking: unavailable (no active provider/API key)")
+    else:
+        lines.append("LLM ranking: enabled")
     if stats.ranking_threshold > 0:
         lines.append(f"Relevance threshold: {stats.ranking_threshold:.1f}")
     if stats.scoring_candidates > 0:
@@ -1942,8 +2016,10 @@ def compose_email_html(
     now_utc: datetime,
     since_utc: datetime,
     timezone_name: str,
+    output_language: str = "en",
     stats: DigestStats | None = None,
 ) -> str:
+    ui = email_ui_labels(output_language)
     now_local = format_local_time(now_utc, timezone_name)
     since_local = format_local_time(since_utc, timezone_name)
 
@@ -2078,9 +2154,9 @@ def compose_email_html(
         authors_text = html.escape(format_authors(paper.authors))
         published_local = html.escape(format_local_time(paper.published_at_utc, timezone_name))
 
-        relevance_text = escape_multiline(paper.llm_relevance_ko or "No LLM relevance reason generated.")
-        core_text = escape_multiline(paper.llm_core_point_ko or "No core-point summary generated.")
-        useful_text = escape_multiline(paper.llm_usefulness_ko or "No usefulness summary generated.")
+        relevance_text = escape_multiline(paper.llm_relevance_text or ui["fallback_relevance"])
+        core_text = escape_multiline(paper.llm_core_point_text or ui["fallback_core"])
+        useful_text = escape_multiline(paper.llm_usefulness_text or ui["fallback_useful"])
 
         sections.append(
             f"""
@@ -2117,7 +2193,7 @@ def compose_email_html(
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-left:3px solid #2d5a3d;background:#e8f0eb;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
-                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#1f4d34;">Why this matches your work</div>
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#1f4d34;">{html.escape(ui["why"])}</div>
                     <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{relevance_text}</div>
                   </td>
                 </tr>
@@ -2126,7 +2202,7 @@ def compose_email_html(
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #c4b99a;background:#f8f6f2;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
-                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#8a7d5a;">Key finding</div>
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#8a7d5a;">{html.escape(ui["key"])}</div>
                     <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{core_text}</div>
                   </td>
                 </tr>
@@ -2135,7 +2211,7 @@ def compose_email_html(
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-left:3px solid #6a9fd8;background:#f2f6fb;border-radius:7px;">
                 <tr>
                   <td style="padding:10px 12px;">
-                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#4a7fb5;">How you can use this</div>
+                    <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#4a7fb5;">{html.escape(ui["how"])}</div>
                     <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{useful_text}</div>
                   </td>
                 </tr>
@@ -2144,12 +2220,12 @@ def compose_email_html(
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-top:1px dashed #e5e3de;">
                 <tr>
                   <td style="padding-top:10px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.7px;font-weight:700;">
-                    Abstract preview
+                    {html.escape(ui["abstract"])}
                   </td>
                 </tr>
                 <tr>
                   <td style="padding-top:4px;font-size:12px;line-height:1.65;color:#8a8a8a;">
-                    {html.escape(snippet or "No abstract available.")}
+                    {html.escape(snippet or ui["fallback_abstract"])}
                   </td>
                 </tr>
               </table>
@@ -2217,8 +2293,10 @@ def compose_email_text(
     now_utc: datetime,
     since_utc: datetime,
     timezone_name: str,
+    output_language: str = "en",
     stats: DigestStats | None = None,
 ) -> str:
+    ui = email_ui_labels(output_language)
     lines = [
         "Daily Paper Digest",
         f"Window: {format_local_time(since_utc, timezone_name)} ~ {format_local_time(now_utc, timezone_name)}",
@@ -2240,18 +2318,18 @@ def compose_email_text(
         lines.append(f"Published: {format_local_time(paper.published_at_utc, timezone_name)}")
         lines.append(f"Authors: {format_authors(paper.authors)}")
         lines.append("Matched keywords: " + (", ".join((paper.matched_keywords or [])[:10]) or "N/A"))
-        if paper.llm_relevance_ko:
-            lines.append(f"LLM relevance reason: {paper.llm_relevance_ko}")
-        if paper.llm_core_point_ko:
-            lines.append("Core point:")
-            lines.append(paper.llm_core_point_ko)
-        if paper.llm_usefulness_ko:
-            lines.append("Why useful for your work:")
-            lines.append(paper.llm_usefulness_ko)
+        if paper.llm_relevance_text:
+            lines.append(f"{ui['why']}: {paper.llm_relevance_text}")
+        if paper.llm_core_point_text:
+            lines.append(f"{ui['key']}:")
+            lines.append(paper.llm_core_point_text)
+        if paper.llm_usefulness_text:
+            lines.append(f"{ui['how']}:")
+            lines.append(paper.llm_usefulness_text)
         abstract = clean_text(paper.abstract)
         if len(abstract) > 500:
             abstract = abstract[:500] + "..."
-        lines.append(f"Abstract: {abstract or 'No abstract available.'}")
+        lines.append(f"Abstract: {abstract or ui['fallback_abstract']}")
         lines.append("")
     if stats:
         lines.append("[Selection Diagnostics]")
@@ -2292,12 +2370,15 @@ def collect_and_rank_papers(
     now_utc: datetime,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> Tuple[List[Paper], DigestStats]:
+    llm_provider_ready = has_llm_provider(config)
     stats = DigestStats(
         ranking_threshold=config.min_relevance_score,
         send_frequency=config.send_frequency,
         lookback_hours=config.lookback_hours,
         llm_max_candidates_base=config.llm_max_candidates_base,
         llm_max_candidates_effective=config.llm_max_candidates,
+        llm_agent_enabled=config.enable_llm_agent,
+        llm_provider_ready=llm_provider_ready,
     )
     since_utc = now_utc - timedelta(hours=config.lookback_hours)
     configured_arxiv_queries = dedupe_list(list(config.arxiv_queries))[: config.max_search_queries_per_source]
@@ -2313,7 +2394,7 @@ def collect_and_rank_papers(
     semantic_queries = list(configured_semantic_queries)
     google_scholar_queries = list(configured_google_scholar_queries)
     stats.query_strategy = "saved-topics"
-    if config.enable_llm_agent and has_llm_provider(config):
+    if config.enable_llm_agent and llm_provider_ready:
         stats.estimated_llm_calls_upper_bound = 1 + (
             (max(1, config.llm_max_candidates) - 1) // max(1, config.llm_batch_size)
         )
@@ -2558,6 +2639,7 @@ def run_digest(
 ) -> str:
     emit_progress(progress_callback, "Starting digest job...", 5)
     now_utc = datetime.now(timezone.utc)
+    local_send_date: date | None = None
     if not dry_run and not force_send:
         should_send_today, next_due_date = evaluate_send_cadence(config, now_utc)
         if not should_send_today:
@@ -2567,6 +2649,12 @@ def run_digest(
             )
             logging.info(skipped_message)
             emit_progress(progress_callback, "Skipped by send frequency policy.", 100)
+            return skipped_message
+        should_send_window, window_reason, local_send_date = should_send_now(config, now_utc)
+        if not should_send_window:
+            skipped_message = f"Skipping send: {window_reason}"
+            logging.info(skipped_message)
+            emit_progress(progress_callback, "Skipped by local send-time window.", 100)
             return skipped_message
     since_utc = now_utc - timedelta(hours=config.lookback_hours)
     ranked_papers, stats = collect_and_rank_papers(
@@ -2584,8 +2672,22 @@ def run_digest(
     stats.final_selected = len(papers)
     emit_progress(progress_callback, "Composing email body...", 95)
     subject = f"[Paper Digest] {len(papers)} relevant papers ({now_utc.astimezone(config.timezone):%Y-%m-%d})"
-    html_body = compose_email_html(papers, now_utc, since_utc, config.timezone_name, stats=stats)
-    text_body = compose_email_text(papers, now_utc, since_utc, config.timezone_name, stats=stats)
+    html_body = compose_email_html(
+        papers,
+        now_utc,
+        since_utc,
+        config.timezone_name,
+        output_language=config.output_language,
+        stats=stats,
+    )
+    text_body = compose_email_text(
+        papers,
+        now_utc,
+        since_utc,
+        config.timezone_name,
+        output_language=config.output_language,
+        stats=stats,
+    )
 
     if dry_run:
         logging.info("Dry run enabled. Skipping email sending.")
@@ -2603,6 +2705,13 @@ def run_digest(
     for paper in papers:
         sent_history[paper.paper_id] = now_utc.isoformat()
     save_sent_history(get_sent_history_path(), sent_history)
+    if not force_send and local_send_date is not None:
+        save_scheduled_send_lock(
+            get_scheduled_send_lock_path(),
+            local_send_date.isoformat(),
+            now_utc,
+            config.timezone_name,
+        )
     logging.info("Email sent to %s", config.recipient_email or config.gmail_address)
     emit_progress(progress_callback, "Email sent.", 100)
     return text_body
@@ -2628,6 +2737,26 @@ def read_float_env(name: str, default: float) -> float:
     except ValueError:
         logging.warning("Invalid float for %s=%r. Using default %.2f.", name, raw, default)
         return default
+
+
+def normalize_relevance_score(raw_score: float, env_name: str, default: float) -> float:
+    score = raw_score
+    if 0.0 < score <= 1.0:
+        converted = score * 10.0
+        logging.warning(
+            "%s=%.3f looks like a 0-1 scale value. Converting to %.1f (0-10 scale).",
+            env_name,
+            score,
+            converted,
+        )
+        score = converted
+    if score < 0:
+        logging.warning("%s=%.3f is below 0. Using default %.1f.", env_name, score, default)
+        return default
+    if score > 10:
+        logging.warning("%s=%.3f is above 10. Capping to 10.0.", env_name, score)
+        score = 10.0
+    return score
 
 
 def normalize_send_frequency(raw: str) -> Tuple[str, int]:
@@ -2694,6 +2823,63 @@ def output_language_display_name(code: str) -> str:
     }
     normalized = normalize_output_language(code)
     return names.get(normalized, normalized)
+
+
+def email_ui_labels(output_language: str) -> Dict[str, str]:
+    language = normalize_output_language(output_language).split("-")[0]
+    labels_by_lang: Dict[str, Dict[str, str]] = {
+        "en": {
+            "why": "Why this matches your work",
+            "key": "Key finding",
+            "how": "How you can use this",
+            "abstract": "Abstract preview",
+            "fallback_relevance": "No LLM relevance reason generated.",
+            "fallback_core": "No core-point summary generated.",
+            "fallback_useful": "No usefulness summary generated.",
+            "fallback_abstract": "No abstract available.",
+        },
+        "ko": {
+            "why": "왜 이 논문이 내 연구와 맞는가",
+            "key": "핵심 포인트",
+            "how": "활용 방법",
+            "abstract": "초록 미리보기",
+            "fallback_relevance": "LLM 관련성 설명이 생성되지 않았습니다.",
+            "fallback_core": "핵심 요약이 생성되지 않았습니다.",
+            "fallback_useful": "활용성 설명이 생성되지 않았습니다.",
+            "fallback_abstract": "초록 정보가 없습니다.",
+        },
+        "ja": {
+            "why": "研究との関連性",
+            "key": "主要な発見",
+            "how": "活用方法",
+            "abstract": "要旨プレビュー",
+            "fallback_relevance": "LLMによる関連性説明が生成されませんでした。",
+            "fallback_core": "コア要約が生成されませんでした。",
+            "fallback_useful": "活用性の説明が生成されませんでした。",
+            "fallback_abstract": "要旨がありません。",
+        },
+        "es": {
+            "why": "Por qué coincide con tu trabajo",
+            "key": "Hallazgo clave",
+            "how": "Cómo puedes usarlo",
+            "abstract": "Vista previa del resumen",
+            "fallback_relevance": "No se generó la razón de relevancia por LLM.",
+            "fallback_core": "No se generó el resumen del punto clave.",
+            "fallback_useful": "No se generó la explicación de utilidad.",
+            "fallback_abstract": "No hay resumen disponible.",
+        },
+        "fr": {
+            "why": "Pourquoi cela correspond à vos travaux",
+            "key": "Résultat clé",
+            "how": "Comment l'utiliser",
+            "abstract": "Aperçu du résumé",
+            "fallback_relevance": "Aucune justification de pertinence LLM générée.",
+            "fallback_core": "Aucun résumé du point clé généré.",
+            "fallback_useful": "Aucune explication d'utilité générée.",
+            "fallback_abstract": "Aucun résumé disponible.",
+        },
+    }
+    return labels_by_lang.get(language, labels_by_lang["en"])
 
 
 def compute_internal_schedule_time(
@@ -2831,16 +3017,21 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     send_anchor_date = os.getenv("SEND_ANCHOR_DATE", "2026-01-01").strip() or "2026-01-01"
     output_language = normalize_output_language(os.getenv("OUTPUT_LANGUAGE", "en"))
     gemini_max_papers = max(1, read_int_env("GEMINI_MAX_PAPERS", 5))
-    llm_relevance_threshold = read_float_env("LLM_RELEVANCE_THRESHOLD", 7.0)
+    llm_relevance_threshold = normalize_relevance_score(
+        read_float_env("LLM_RELEVANCE_THRESHOLD", 7.0),
+        "LLM_RELEVANCE_THRESHOLD",
+        7.0,
+    )
     llm_batch_size = max(1, read_int_env("LLM_BATCH_SIZE", 5))
     llm_max_candidates_base = min(80, max(1, read_int_env("LLM_MAX_CANDIDATES", 30)))
     llm_max_candidates = scale_llm_max_candidates(llm_max_candidates_base, send_interval_days)
     max_search_queries_per_source = max(1, read_int_env("MAX_SEARCH_QUERIES_PER_SOURCE", 4))
     sent_history_days = max(1, read_int_env("SENT_HISTORY_DAYS", 14))
 
-    timezone_name = os.getenv("TIMEZONE", "Asia/Seoul").strip() or "Asia/Seoul"
+    timezone_name = os.getenv("TIMEZONE", "UTC").strip() or "UTC"
     send_hour = read_int_env("SEND_HOUR", 9)
     send_minute = read_int_env("SEND_MINUTE", 0)
+    send_time_window_minutes = max(1, read_int_env("SEND_TIME_WINDOW_MINUTES", 15))
     max_papers = max(1, read_int_env("MAX_PAPERS", 5))
     lookback_hours = max(1, read_int_env("LOOKBACK_HOURS", 24))
     min_lookback_hours = send_interval_days * 24
@@ -2852,7 +3043,11 @@ def load_config(require_email_credentials: bool) -> AppConfig:
             send_frequency,
         )
         lookback_hours = min_lookback_hours
-    min_relevance_score = read_float_env("MIN_RELEVANCE_SCORE", 6.0)
+    min_relevance_score = normalize_relevance_score(
+        read_float_env("MIN_RELEVANCE_SCORE", 6.0),
+        "MIN_RELEVANCE_SCORE",
+        6.0,
+    )
     arxiv_max_results_per_query = max(1, read_int_env("ARXIV_MAX_RESULTS_PER_QUERY", 25))
     pubmed_max_ids_per_query = max(1, read_int_env("PUBMED_MAX_IDS_PER_QUERY", 25))
 
@@ -2906,6 +3101,7 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         timezone_name=timezone_name,
         send_hour=send_hour,
         send_minute=send_minute,
+        send_time_window_minutes=send_time_window_minutes,
         max_papers=max_papers,
         lookback_hours=lookback_hours,
         min_relevance_score=min_relevance_score,

@@ -5,14 +5,13 @@
 - Ubuntu / Windows / macOS 러너에서 수동 테스트도 하고 싶은 사용자
 
 현재 문서는 **GitHub Actions 기준 운영 매뉴얼**입니다.
-기존 로컬 실행 중심 매뉴얼은 아래 백업 파일에 보존되어 있습니다.
-- `../archive/MANUAL_KR_LOCAL_LEGACY_v033.md`
+기존 로컬 실행 중심 레거시 문서는 private archive로 이관되었습니다.
 
 처음 설치하는 사용자는 아래 문서를 먼저 보세요.
 - `MANUAL_FIRSTTIME_KR.md` (초보자용 단계별 가이드)
 
 ## 1) 이 버전의 핵심
-- 기본 목표 시각은 매일 아침 9시(KST), 내부 트리거는 8시 47분(KST)
+- 발송 시각은 `TIMEZONE` + `SEND_HOUR` + `SEND_MINUTE` 설정을 따릅니다.
 - 내 PC 전원 상태와 무관하게 동작
 - 수동 실행 시 러너 OS 선택 가능
   - `ubuntu-latest`
@@ -60,6 +59,7 @@ RECIPIENT_EMAIL=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 
 # Schedule / Time
+# 본인 IANA 타임존을 사용하세요 (예: Asia/Seoul, America/New_York, Europe/London)
 TIMEZONE=Asia/Seoul
 SEND_HOUR=9
 SEND_MINUTE=0
@@ -189,13 +189,16 @@ GOOGLE_SCHOLAR_API_KEY=
 
 ## 5) 자동 실행
 스케줄은 워크플로우에 이미 설정되어 있습니다.
-- `cron: "47 23 * * *"` = 매일 23:47 UTC = 한국시간 08:47 (기본 09:00보다 13분 앞선 내부 트리거)
+- `cron: "*/15 * * * *"` (UTC, 15분 간격 폴링)
 
 동작 조건:
 - 기본 브랜치에 워크플로우 파일이 존재
 - `PM_ENV_FILE`, `PM_TOPICS_JSON` 두 Secret이 정상 등록
 - Gmail/LLM 키가 유효
-- 실제 메일 발송은 `SEND_FREQUENCY`(`daily`/`every_3_days`/`weekly`) 정책을 따릅니다.
+- 실제 메일 발송은 아래 조건을 모두 만족할 때만 수행됩니다.
+  - 로컬 발송 시각 윈도우 (`TIMEZONE` + `SEND_HOUR` + `SEND_MINUTE`)
+  - 주기 정책 (`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`)
+  - 로컬 날짜 기준 1회 발송 락
 
 ## 6) 수동 실행 (OS/모드 선택)
 1. `Actions` 탭으로 이동

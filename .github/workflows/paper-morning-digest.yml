@@ -2,9 +2,9 @@ name: paper-morning-digest
 
 on:
   schedule:
-    # Default user time 09:00 KST is internally triggered 13 minutes earlier for stability.
-    # 08:47 KST = 23:47 UTC (previous day)
-    - cron: "47 23 * * *"
+    # Run frequently; actual send timing is decided in app code via:
+    # TIMEZONE + SEND_HOUR + SEND_MINUTE + SEND_FREQUENCY.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       os_runner:
@@ -45,7 +45,7 @@ jobs:
       PAPER_DIGEST_ENV_PATH: ${{ github.workspace }}/ci_runtime/.env
       PAPER_DIGEST_DATA_DIR: ${{ github.workspace }}/ci_runtime/data
       PYTHONUTF8: "1"
-      TZ: Asia/Seoul
+      TZ: UTC
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +83,7 @@ jobs:
       PAPER_DIGEST_ENV_PATH: ${{ github.workspace }}/ci_runtime/.env
       PAPER_DIGEST_DATA_DIR: ${{ github.workspace }}/ci_runtime/data
       PYTHONUTF8: "1"
-      TZ: Asia/Seoul
+      TZ: UTC
     steps:
       - name: Checkout
         uses: actions/checkout@v4

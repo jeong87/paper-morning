@@ -78,9 +78,11 @@ http://127.0.0.1:5050
 - `PM_PROJECTS_JSON` : 프로젝트 목록만 담은 JSON (초기 쿼리 생성용)
 
 ### 스케줄
-- 워크플로우 트리거는 매일 08:47 KST(= 23:47 UTC, 전날)
-- 내부적으로 지연 완화를 위해 사용자가 지정한 시각보다 13분 먼저 트리거합니다.
-- 실제 메일 발송은 `SEND_FREQUENCY` 정책(`daily/every_3_days/weekly`)에 따라 결정
+- 워크플로우는 15분 간격(`*/15 * * * *`, UTC)으로 폴링 실행됩니다.
+- 실제 메일 발송은 아래 조건을 모두 만족할 때만 실행됩니다.
+  - 로컬 발송 시각 윈도우(`TIMEZONE` + `SEND_HOUR` + `SEND_MINUTE`)
+  - 주기 정책(`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`)
+  - 로컬 날짜 기준 1회 발송 락
 
 ## 핵심 설정값
 `SEND_FREQUENCY` / `SEND_ANCHOR_DATE`

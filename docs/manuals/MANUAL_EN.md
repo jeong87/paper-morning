@@ -10,7 +10,7 @@ If you are new, start here first:
 - `MANUAL_FIRSTTIME_EN.md`
 
 ## 1) Core behavior
-- Default target send time: 09:00 KST (internal trigger runs 13 minutes earlier)
+- Delivery time follows your own timezone (`TIMEZONE`) and send time (`SEND_HOUR`, `SEND_MINUTE`)
 - Works independently from your local PC power state
 - Manual runs support runner OS selection:
   - `ubuntu-latest`
@@ -56,7 +56,8 @@ RECIPIENT_EMAIL=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 
 # Schedule / Time
-TIMEZONE=Asia/Seoul
+# Use your own IANA timezone (examples: America/New_York, Europe/London, Asia/Seoul)
+TIMEZONE=America/New_York
 SEND_HOUR=9
 SEND_MINUTE=0
 SEND_FREQUENCY=daily
@@ -143,10 +144,13 @@ Steps:
 
 ## 5) Automatic schedule
 Configured cron:
-- `47 23 * * *` (UTC), equivalent to 08:47 KST internal trigger
+- `*/15 * * * *` (UTC, every 15 minutes)
 
 Delivery behavior:
-- Actual delivery still follows `SEND_FREQUENCY` (`daily`, `every_3_days`, `weekly`)
+- Workflow polling is frequent, but real delivery happens only when all checks pass:
+  - local send-time window (`TIMEZONE` + `SEND_HOUR` + `SEND_MINUTE`)
+  - cadence policy (`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`)
+  - local-date lock (only once per local date)
 - `send_now` bypasses cadence for immediate testing
 
 ## 6) Manual run procedure

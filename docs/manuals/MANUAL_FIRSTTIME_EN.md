@@ -12,7 +12,7 @@ If you follow the steps in order, GitHub Actions will send your digest automatic
 ## 1) What to understand first
 1. The digest job runs on GitHub Actions runners.
 2. Your personal laptop does not need to stay on 24/7.
-3. Default target send time is 09:00 KST (internal trigger is 13 minutes earlier).
+3. Delivery time follows your own timezone and send-time settings.
 4. The critical setup is registering two repository secrets.
 
 ## 2) Create a Gmail app password (most important)
@@ -73,7 +73,8 @@ GMAIL_ADDRESS=your_sender@gmail.com
 RECIPIENT_EMAIL=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 
-TIMEZONE=Asia/Seoul
+# Use your own IANA timezone (examples: America/New_York, Europe/London, Asia/Seoul)
+TIMEZONE=America/New_York
 SEND_HOUR=9
 SEND_MINUTE=0
 SEND_FREQUENCY=daily
@@ -175,7 +176,8 @@ Success criteria:
 
 ## 7) Daily automation
 No extra button is required.
-The workflow already includes a daily schedule trigger.
+The workflow already includes a scheduled trigger.
+The workflow polls every 15 minutes, and the app sends only near your configured local time.
 You should receive the next day digest automatically if secrets are valid.
 If Actions is still disabled in your fork, daily automation will not run.
 

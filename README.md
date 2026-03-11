@@ -1,6 +1,6 @@
 ﻿# Paper Morning
 
-[![Paper Morning Logo](assets/papermorning2.png)](https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html)
+[![Paper Morning Logo](assets/papermorning2.png)](https://jeong87.github.io/paper-morning/demo/)
 
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
 It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
@@ -10,7 +10,7 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Live Demo
-<a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jeong87/paper-morning/main/docs/demo/index.html" target="_blank" rel="noopener noreferrer">Open Live Demo</a>
+<a href="https://jeong87.github.io/paper-morning/demo/">Open Live Demo</a>
 
 ## What It Does
 1. Reads your project context and saved search queries.
@@ -96,6 +96,10 @@ To publish demo on your fork:
 1. Enable GitHub Pages source as **GitHub Actions**.
 2. Run `deploy-demo-pages` workflow (or push to `main`).
 
+Repo settings TODO (outside code):
+- Fill GitHub About fields (`description`, `website`, `topics`).
+- Publish the first tagged GitHub Release.
+
 ## Troubleshooting (Quick)
 - `Search query is empty`: generate and save topics/queries in Topic Editor.
 - `PubMed 429`: retries are automatic, but adding `NCBI_API_KEY` is recommended.
@@ -104,7 +108,7 @@ To publish demo on your fork:
 
 ## Authentication Priority
 1. Gmail App Password (current default for public beta users)
-2. Google OAuth (available but currently not the default public path)
+2. Google OAuth (intentionally hidden in default UI path until public rollout is ready)
 
 Gmail app password docs:
 - https://myaccount.google.com/apppasswords
