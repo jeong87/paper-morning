@@ -3,5 +3,6 @@ feedparser==6.0.11
 Flask==3.0.3
 Markdown==3.7
 keyring==25.6.0
+PyYAML==6.0.2
 python-dotenv==1.0.1
 requests==2.32.3

@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.paper_digest_app import CEREBRAS_API_BASE_DEFAULT, mask_sensitive_text, parse_json_loose
+from app.projects_config import DEFAULT_PROJECTS_CONFIG_FILE, read_projects_config
 
 GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -113,11 +114,20 @@ def resolve_projects() -> Tuple[List[Dict[str, str]], str]:
         if projects:
             return projects, "secret.PM_TOPICS_JSON.projects"
 
+    projects_file = os.getenv("PM_PROJECTS_FILE", DEFAULT_PROJECTS_CONFIG_FILE).strip() or DEFAULT_PROJECTS_CONFIG_FILE
+    projects_path = (ROOT_DIR / projects_file).resolve()
+    file_projects, errors = read_projects_config(projects_path)
+    if not errors and file_projects:
+        projects = normalize_projects(file_projects)
+        if projects:
+            return projects, f"repo:{projects_path}"
+
     fail(
         "No project input found. Provide one of: "
         "1) workflow input PM_PROJECTS_LINES, "
         "2) secret PM_PROJECTS_JSON, "
-        "3) secret PM_TOPICS_JSON with non-empty projects."
+        "3) secret PM_TOPICS_JSON with non-empty projects, "
+        "4) tracked config/projects.yaml."
     )
 
 

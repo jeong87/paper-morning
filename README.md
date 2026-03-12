@@ -33,28 +33,9 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
 - Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
 
-## GitHub Actions Mode (Recommended)
-If you do not want your PC running 24/7, use Actions.
+## Recommended First Path (Preview-First, Local)
+Generate your first personalized digest preview before email/automation setup.
 
-Required workflow files:
-- `.github/workflows/paper-morning-digest.yml`
-- `.github/workflows/paper-morning-bootstrap-topics.yml`
-
-Required secrets:
-- `PM_ENV_FILE` (full `.env` content)
-- `PM_TOPICS_JSON` (full `user_topics.json` content)
-
-Optional secret:
-- `PM_PROJECTS_JSON` (project list only, for bootstrap query generation)
-
-## Important Settings
-- `SEND_FREQUENCY` / `SEND_ANCHOR_DATE`: cadence policy.
-- `LOOKBACK_HOURS`: search window length.
-- `LLM_MAX_CANDIDATES`: prefilter cap for LLM scoring.
-- `OUTPUT_LANGUAGE`: summary language for LLM-generated reason/core/usefulness text.
-- `ENABLE_GOOGLE_SCHOLAR` + `GOOGLE_SCHOLAR_API_KEY`: optional SerpAPI source.
-
-## Local Web Console
 1. Install dependencies:
 
 ```bash
@@ -67,13 +48,42 @@ pip install -r deps/requirements.txt
 python app/web_app.py --host 127.0.0.1 --port 5050
 ```
 
-3. Open:
+3. Open `http://127.0.0.1:5050/setup`.
+4. Fill project description + Gemini key, then click `Save and Preview Now`.
+
+This verifies product value first without Gmail or GitHub Actions setup.
+
+## GitHub Actions Mode (Advanced Automation)
+Use this after preview quality is confirmed.
+
+Required workflow files:
+- `.github/workflows/paper-morning-digest.yml`
+- `.github/workflows/paper-morning-bootstrap-topics.yml`
+
+Required secrets:
+- `PM_ENV_FILE` (full `.env` content)
+
+Optional secret:
+- `PM_TOPICS_JSON` (full `user_topics.json` content)
+- `PM_PROJECTS_JSON` (project list only, for bootstrap query generation)
+
+Tracked non-secret config:
+- `config/projects.yaml` (project descriptions used for bootstrap/default onboarding)
+
+## Important Settings
+- `ONBOARDING_MODE`: `preview` (default) or `daily`.
+- `SEND_FREQUENCY` / `SEND_ANCHOR_DATE`: cadence policy.
+- `LOOKBACK_HOURS`: search window length.
+- `LLM_MAX_CANDIDATES`: prefilter cap for LLM scoring.
+- `OUTPUT_LANGUAGE`: summary language for LLM-generated reason/core/usefulness text.
+- `ENABLE_GOOGLE_SCHOLAR` + `GOOGLE_SCHOLAR_API_KEY`: optional SerpAPI source.
+
+## Local Web Console
+Main path for onboarding and preview-first setup:
 
 ```text
 http://127.0.0.1:5050
 ```
-
-4. Configure keys/settings, then save topics/queries.
 
 ## Build Distribution Files
 ### Windows
@@ -99,6 +109,18 @@ To publish demo on your fork:
 Repo settings TODO (outside code):
 - Fill GitHub About fields (`description`, `website`, `topics`).
 - Publish the first tagged GitHub Release.
+
+## Template-First Repository Setup
+For global onboarding, prefer:
+- `Use this template` -> create your own repository instance
+
+Fallback (advanced):
+- fork workflow if you explicitly need upstream fork linkage.
+
+## Actions Cost Note (Private Repos)
+- GitHub Free private repos include limited Actions minutes.
+- If your workflow runs frequently (for example every 15 minutes), usage can exceed free minutes.
+- Local-first preview and local scheduling are recommended for cost-safe onboarding.
 
 ## Troubleshooting (Quick)
 - `Search query is empty`: generate and save topics/queries in Topic Editor.

@@ -22,7 +22,7 @@ If you are new, start here first:
 
 ## 2) Execution flow
 1. A scheduled or manual GitHub Actions workflow starts.
-2. Runtime files are reconstructed from secrets (`PM_ENV_FILE`, `PM_TOPICS_JSON`).
+2. Runtime files are reconstructed from secrets/config (`PM_ENV_FILE`, optional `PM_TOPICS_JSON`, optional `PM_PROJECTS_JSON`, tracked `config/projects.yaml`).
 3. `app/paper_digest_app.py --run-once` executes.
 4. Logs and artifacts are uploaded for inspection.
 
@@ -32,7 +32,7 @@ Main workflow:
 ## 3) Initial setup
 
 ### 3-1) Repository readiness
-1. Fork this repo (recommended) or push it to your own repo.
+1. Create your own repo instance via `Use this template` (recommended), or use Fork if you need upstream fork linkage.
 2. Open the `Actions` tab and ensure workflows are enabled.
 3. (First time after fork) if shown, click `I understand my workflows, go ahead and enable them`.
 4. Ensure workflow files exist under `.github/workflows/`.
@@ -43,10 +43,13 @@ Path:
 
 Required:
 1. `PM_ENV_FILE`
-2. `PM_TOPICS_JSON`
 
 Optional:
-3. `PM_PROJECTS_JSON` (bootstrap convenience)
+2. `PM_TOPICS_JSON` (full topics JSON)
+3. `PM_PROJECTS_JSON` (project list for bootstrap convenience)
+
+Tracked non-secret config:
+4. `config/projects.yaml` (project-description-first onboarding path)
 
 #### A) `PM_ENV_FILE` reference
 ```env

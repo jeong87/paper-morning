@@ -62,6 +62,8 @@ jobs:
         env:
           PM_ENV_FILE: ${{ secrets.PM_ENV_FILE }}
           PM_TOPICS_JSON: ${{ secrets.PM_TOPICS_JSON }}
+          PM_PROJECTS_JSON: ${{ secrets.PM_PROJECTS_JSON }}
+          PM_PROJECTS_FILE: config/projects.yaml
         run: python scripts/gha_prepare_runtime.py
 
       - name: Run digest (scheduled send_now)
@@ -100,6 +102,8 @@ jobs:
         env:
           PM_ENV_FILE: ${{ secrets.PM_ENV_FILE }}
           PM_TOPICS_JSON: ${{ secrets.PM_TOPICS_JSON }}
+          PM_PROJECTS_JSON: ${{ secrets.PM_PROJECTS_JSON }}
+          PM_PROJECTS_FILE: config/projects.yaml
         run: python scripts/gha_prepare_runtime.py
 
       - name: Run digest (manual send_now)

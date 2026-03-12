@@ -39,6 +39,12 @@ from paper_digest_app import (
     store_secret_value,
     mask_sensitive_text,
 )
+from projects_config import (
+    DEFAULT_PROJECTS_CONFIG_FILE,
+    read_projects_config,
+    validate_projects,
+    write_projects_config,
+)
 
 
 def read_app_version() -> str:
@@ -102,7 +108,9 @@ EXPECTED_ENV_KEYS = [
     "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY",
     "MAX_SEARCH_QUERIES_PER_SOURCE",
     "NCBI_API_KEY",
+    "PROJECTS_CONFIG_FILE",
     "USER_TOPICS_FILE",
+    "ONBOARDING_MODE",
     "WEB_PASSWORD",
     "UI_LANGUAGE",
     "ALLOW_INSECURE_REMOTE_WEB",
@@ -155,7 +163,9 @@ DEFAULT_ENV_VALUES = {
     "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY": "10",
     "MAX_SEARCH_QUERIES_PER_SOURCE": "4",
     "NCBI_API_KEY": "",
+    "PROJECTS_CONFIG_FILE": DEFAULT_PROJECTS_CONFIG_FILE,
     "USER_TOPICS_FILE": "user_topics.json",
+    "ONBOARDING_MODE": "preview",
     "WEB_PASSWORD": "",
     "UI_LANGUAGE": "en",
     "ALLOW_INSECURE_REMOTE_WEB": "false",
@@ -1108,6 +1118,102 @@ def get_topics_path(env_map: Dict[str, str]) -> Path:
     return topic_path.resolve()
 
 
+def get_projects_config_path(env_map: Dict[str, str]) -> Path:
+    configured = (env_map.get("PROJECTS_CONFIG_FILE") or DEFAULT_PROJECTS_CONFIG_FILE).strip()
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = resolve_env_path().parent / path
+    return path.resolve()
+
+
+def build_projects_for_llm(projects: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    prepared: List[Dict[str, str]] = []
+    for item in projects:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        context = str(item.get("context", "")).strip()
+        keywords_raw = item.get("keywords", [])
+        if isinstance(keywords_raw, str):
+            keywords = [part.strip() for part in keywords_raw.split(",") if part.strip()]
+        elif isinstance(keywords_raw, list):
+            keywords = [str(part).strip() for part in keywords_raw if str(part).strip()]
+        else:
+            keywords = []
+        if keywords:
+            context = f"{context} | Keywords: {', '.join(keywords)}" if context else f"Keywords: {', '.join(keywords)}"
+        if not (name or context):
+            continue
+        prepared.append({"name": name or "Untitled project", "context": context})
+    return prepared
+
+
+def maybe_generate_topics_from_projects(
+    env_map: Dict[str, str],
+    topics_path: Path,
+    topics_payload: Dict[str, Any],
+) -> Tuple[bool, str, Dict[str, Any]]:
+    projects = topics_payload.get("projects", []) if isinstance(topics_payload, dict) else []
+    if not isinstance(projects, list):
+        projects = []
+
+    if not projects:
+        projects_path = get_projects_config_path(env_map)
+        loaded_projects, errors = read_projects_config(projects_path)
+        if errors:
+            return (
+                False,
+                "No projects found for preview bootstrap. "
+                f"Add at least one project in {projects_path}. ({'; '.join(errors)})",
+                topics_payload,
+            )
+        projects = loaded_projects
+
+    llm_projects = build_projects_for_llm(projects)
+    if not llm_projects:
+        return False, "Project descriptions are empty. Add project name/context first.", topics_payload
+
+    gemini_api_key = resolve_secret_value("GEMINI_API_KEY", env_map.get("GEMINI_API_KEY", "").strip())
+    enable_cerebras_fallback = env_truthy(env_map.get("ENABLE_CEREBRAS_FALLBACK", "true"))
+    cerebras_api_key = resolve_secret_value("CEREBRAS_API_KEY", env_map.get("CEREBRAS_API_KEY", "").strip())
+    if not gemini_api_key and not (enable_cerebras_fallback and cerebras_api_key):
+        return (
+            False,
+            "Preview bootstrap needs an LLM key. Set GEMINI_API_KEY "
+            "(or enable Cerebras fallback with CEREBRAS_API_KEY).",
+            topics_payload,
+        )
+
+    gemini_model = get_effective_gemini_model(env_map)
+    cerebras_model = env_map.get("CEREBRAS_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b"
+    cerebras_api_base = (
+        env_map.get("CEREBRAS_API_BASE", CEREBRAS_API_BASE_DEFAULT).strip() or CEREBRAS_API_BASE_DEFAULT
+    )
+
+    try:
+        raw_response = call_llm_for_topic_generation(
+            projects=llm_projects,
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
+            cerebras_api_key=cerebras_api_key,
+            cerebras_model=cerebras_model,
+            cerebras_api_base=cerebras_api_base,
+            enable_cerebras_fallback=enable_cerebras_fallback,
+        )
+    except Exception as exc:
+        return False, f"Automatic topic generation failed: {safe_exception_text(exc)}", topics_payload
+
+    generated_topics = sanitize_generated_topics(raw_response)
+    if not generated_topics:
+        return False, "Automatic topic generation returned no valid query set.", topics_payload
+
+    next_payload = {"projects": projects, "topics": generated_topics}
+    topics_path.parent.mkdir(parents=True, exist_ok=True)
+    topics_path.write_text(json.dumps(next_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    enforce_private_file_permissions(topics_path)
+    return True, f"Generated {len(generated_topics)} topics from project descriptions.", next_payload
+
+
 def ensure_bootstrap_files() -> None:
     env_path, topics_path = bootstrap_runtime_files()
     logging.info("Using env file: %s", env_path)
@@ -1612,6 +1718,17 @@ def read_log_tail(path: Path, max_lines: int = 400, max_chars: int = 200_000) ->
     return "\n".join(lines) if lines else "(empty log)"
 
 
+def read_latest_preview_payload() -> Dict[str, Any]:
+    preview_path = (get_default_data_dir() / "digest_preview.json").resolve()
+    if not preview_path.exists():
+        return {}
+    try:
+        payload = json.loads(preview_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def get_job_state_snapshot() -> Dict[str, Any]:
     with job_state_lock:
         return dict(job_state)
@@ -1629,14 +1746,32 @@ def start_background_job(kind: str) -> Tuple[bool, str]:
         topics_payload = read_topics_payload(topics_path)
         semantic_enabled = env_truthy(env_map.get("ENABLE_SEMANTIC_SCHOLAR", "true"))
         google_scholar_enabled = env_truthy(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false"))
-        if not has_configured_topic_queries(
+        has_queries = has_configured_topic_queries(
             topics_payload,
             enable_semantic_scholar=semantic_enabled,
             enable_google_scholar=google_scholar_enabled,
-        ):
+        )
+        if not has_queries and kind == "dry_run":
+            generated, message, topics_payload = maybe_generate_topics_from_projects(
+                env_map=env_map,
+                topics_path=topics_path,
+                topics_payload=topics_payload,
+            )
+            if not generated:
+                return False, message
+            has_queries = has_configured_topic_queries(
+                topics_payload,
+                enable_semantic_scholar=semantic_enabled,
+                enable_google_scholar=google_scholar_enabled,
+            )
+            if not has_queries:
+                return False, "Generated topics do not contain valid search queries. Update Topic Editor and retry."
+
+        if not has_queries:
             return (
                 False,
-                "No search queries are configured. In Topic Editor, run 'Generate Keyword / Query' or manually enter arXiv/PubMed/Semantic Scholar/Google Scholar queries, then save topics first.",
+                "No search queries are configured yet. Run Preview once first to auto-generate topics, "
+                "or open Topic Editor and generate/save queries manually.",
             )
 
     if kind == "send_now":
@@ -1680,7 +1815,7 @@ def run_background_job(kind: str) -> None:
                 progress_callback=progress_cb,
             )
             last_dry_run_output = output
-            update_job_state(status="Dry-run completed.", progress=100)
+            update_job_state(status="Preview generated.", progress=100)
         elif kind == "send_now":
             progress_cb("Loading configuration...", 5)
             config = load_config(require_email_credentials=True)
@@ -1693,7 +1828,7 @@ def run_background_job(kind: str) -> None:
             )
             last_send_result = output
             mark_send_now_executed()
-            update_job_state(status="Send-now completed.", progress=100)
+            update_job_state(status="Send-now completed (advanced mode).", progress=100)
         elif kind == "reload_scheduler":
             progress_cb("Reloading scheduler...", 30)
             msg = refresh_scheduler()
@@ -1929,7 +2064,32 @@ def build_home_body() -> str:
     env_map = read_env_map()
     oauth_values = get_effective_google_oauth_values(env_map)
     escaped_status = html.escape(scheduler_status_text())
-    escaped_output = html.escape(last_dry_run_output) if last_dry_run_output else "No dry-run yet."
+    escaped_output = html.escape(last_dry_run_output) if last_dry_run_output else "No preview generated yet."
+    preview_payload = read_latest_preview_payload()
+    preview_rows_html = ""
+    preview_papers = preview_payload.get("papers", []) if isinstance(preview_payload, dict) else []
+    if isinstance(preview_papers, list) and preview_papers:
+        rows: List[str] = []
+        for idx, paper in enumerate(preview_papers[:5], start=1):
+            if not isinstance(paper, dict):
+                continue
+            title = html.escape(str(paper.get("title", "") or "Untitled"))
+            source = html.escape(str(paper.get("source", "") or "unknown"))
+            score = html.escape(str(paper.get("score", "")))
+            url = html.escape(str(paper.get("url", "") or ""), quote=True)
+            if url:
+                title_html = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>'
+            else:
+                title_html = title
+            rows.append(
+                "<div style='padding:10px 0; border-bottom:1px solid var(--card-border);'>"
+                f"<div style='font-weight:600;'>#{idx} {title_html}</div>"
+                f"<div class='small' style='margin-top:4px;'>Source: <b>{source}</b> · Score: <b>{score}</b></div>"
+                "</div>"
+            )
+        preview_rows_html = "".join(rows)
+    else:
+        preview_rows_html = "<div class='small'>Run <b>Preview Now</b> to generate your first personalized digest.</div>"
     oauth_connected_email = str(env_map.get("GOOGLE_OAUTH_CONNECTED_EMAIL", "") or "").strip()
     oauth_enabled = env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false")))
     oauth_use_for_gmail = env_truthy(str(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")))
@@ -1976,7 +2136,15 @@ def build_home_body() -> str:
     body = """
     <div class="page-header">
       <h1>Dashboard</h1>
-      <p>Run collection/sending manually and monitor scheduler status.</p>
+      <p>Preview-first workflow: generate a personalized digest preview first, then enable automation.</p>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Mode</p>
+      <div class="small">
+        <strong>Preview mode</strong> (recommended): no email required, generate digest preview now.<br/>
+        <strong>Daily automation mode</strong>: enable scheduled delivery after preview quality is confirmed.
+      </div>
     </div>
 
     <div class="card" style="display:flex; align-items:center; gap:10px; padding:14px 18px;">
@@ -2014,29 +2182,35 @@ def build_home_body() -> str:
     <div class="action-grid">
       <div class="action-card">
         <span class="action-icon">🔍</span>
-        <span class="action-label">Dry-Run</span>
-        <span class="action-desc">Run collection/ranking without sending email.</span>
-        <button id="btn-dry" onclick="startJob('dry_run')">Run</button>
-      </div>
-      <div class="action-card">
-        <span class="action-icon">📨</span>
-        <span class="action-label">Send Now</span>
-        <span class="action-desc">Send one real digest email immediately.</span>
-        <button id="btn-send" class="btn-success" onclick="startJob('send_now')">Send</button>
-      </div>
-      <div class="action-card">
-        <span class="action-icon">🔄</span>
-        <span class="action-label">Reload Scheduler</span>
-        <span class="action-desc">Reload scheduler with updated send time/settings.</span>
-        <button id="btn-reload" class="btn-ghost" onclick="startJob('reload_scheduler')">Reload</button>
-      </div>
-      <div class="action-card">
-        <span class="action-icon">🪟</span>
-        <span class="action-label">Windows Task</span>
-        <span class="action-desc">Register a daily task in Windows Task Scheduler.</span>
-        <button id="btn-task" class="btn-ghost" onclick="startJob('register_windows_task')">Register</button>
+        <span class="action-label">Preview Digest</span>
+        <span class="action-desc">Runs collection/ranking and shows digest output without sending email.</span>
+        <button id="btn-dry" class="btn-success" onclick="startJob('dry_run')">Preview Now</button>
       </div>
     </div>
+
+    <details class="card" style="margin-top:14px;">
+      <summary style="cursor:pointer; font-weight:600;">Advanced automation controls (email/send scheduler)</summary>
+      <div class="action-grid" style="margin-top:12px;">
+        <div class="action-card">
+          <span class="action-icon">📨</span>
+          <span class="action-label">Send Now</span>
+          <span class="action-desc">Send one real digest email immediately.</span>
+          <button id="btn-send" onclick="startJob('send_now')">Send</button>
+        </div>
+        <div class="action-card">
+          <span class="action-icon">🔄</span>
+          <span class="action-label">Reload Scheduler</span>
+          <span class="action-desc">Reload scheduler with updated send time/settings.</span>
+          <button id="btn-reload" class="btn-ghost" onclick="startJob('reload_scheduler')">Reload</button>
+        </div>
+        <div class="action-card">
+          <span class="action-icon">🪟</span>
+          <span class="action-label">Windows Task</span>
+          <span class="action-desc">Register a daily task in Windows Task Scheduler.</span>
+          <button id="btn-task" class="btn-ghost" onclick="startJob('register_windows_task')">Register</button>
+        </div>
+      </div>
+    </details>
 
     <div class="card">
       <p class="card-title">Task Status</p>
@@ -2063,9 +2237,10 @@ def build_home_body() -> str:
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <p class="card-title" style="margin:0; border:none; padding:0;">Last Dry-Run Output</p>
+        <p class="card-title" style="margin:0; border:none; padding:0;">Latest Preview Output</p>
         <button class="btn-ghost" onclick="toggleOutput()" id="btn-toggle" style="padding:4px 10px; font-size:12px;">Collapse ▲</button>
       </div>
+      <div style="margin-bottom:10px;">__PREVIEW_CARDS__</div>
       <div id="output-wrap">
         <pre id="output-pre">__LAST_DRY_OUTPUT__</pre>
       </div>
@@ -2081,7 +2256,7 @@ def build_home_body() -> str:
         btn.textContent = outputVisible ? 'Collapse ▲' : 'Expand ▼';
       }
 
-      const JOB_LABEL = { dry_run: 'Dry-Run', send_now: 'Send Now', reload_scheduler: 'Reload Scheduler', register_windows_task: 'Windows Task Register', none: '' };
+      const JOB_LABEL = { dry_run: 'Preview', send_now: 'Send Now', reload_scheduler: 'Reload Scheduler', register_windows_task: 'Windows Task Register', none: '' };
 
       async function fetchStatus() {
         try {
@@ -2169,6 +2344,7 @@ def build_home_body() -> str:
         body.replace("__SCHEDULER_STATUS__", escaped_status)
         .replace("__SEND_FREQUENCY__", html.escape(send_frequency_label))
         .replace("__LAST_DRY_OUTPUT__", escaped_output)
+        .replace("__PREVIEW_CARDS__", preview_rows_html)
         .replace("__OAUTH_BADGE__", oauth_badge_html)
         .replace("__OAUTH_EMAIL__", html.escape(oauth_connected_email or "Not connected"))
         .replace("__OAUTH_SOURCE__", html.escape(oauth_source))
@@ -2357,7 +2533,12 @@ def setup():
 
     if request.method == "POST":
         updated = dict(env_map)
+        selected_mode = str(request.form.get("ONBOARDING_MODE", "preview") or "preview").strip().lower()
+        if selected_mode not in {"preview", "daily"}:
+            selected_mode = "preview"
+        updated["ONBOARDING_MODE"] = selected_mode
         basic_keys = [
+            "ONBOARDING_MODE",
             "GMAIL_ADDRESS",
             "RECIPIENT_EMAIL",
             "TIMEZONE",
@@ -2365,6 +2546,8 @@ def setup():
             "SEND_MINUTE",
             "SEND_FREQUENCY",
             "SEND_ANCHOR_DATE",
+            "MAX_PAPERS",
+            "OUTPUT_LANGUAGE",
             "WEB_PASSWORD",
             "ENABLE_LLM_AGENT",
             "ENABLE_GEMINI_ADVANCED_REASONING",
@@ -2385,6 +2568,7 @@ def setup():
             "GEMINI_MODEL",
             "CEREBRAS_MODEL",
             "CEREBRAS_API_BASE",
+            "PROJECTS_CONFIG_FILE",
         ]
         for key in basic_keys:
             if (not OAUTH_UI_ENABLED) and key in OAUTH_FORM_KEYS:
@@ -2421,18 +2605,58 @@ def setup():
                 submitted = "".join(submitted.split())
             updated[secret_key] = submitted if submitted else env_map.get(secret_key, "")
 
-        updated["SETUP_WIZARD_COMPLETED"] = "true"
-        try:
-            write_env_map(updated)
+        project_name = request.form.get("PRIMARY_PROJECT_NAME", "").strip()
+        project_context = request.form.get("PRIMARY_PROJECT_CONTEXT", "").strip()
+        project_keywords_raw = request.form.get("PRIMARY_PROJECT_KEYWORDS", "").strip()
+        project_keywords = [part.strip() for part in project_keywords_raw.split(",") if part.strip()]
+        project_payload = [{"name": project_name, "context": project_context, "keywords": project_keywords}]
+        projects_config_path = get_projects_config_path(updated)
+        project_form_failed = False
+
+        project_errors = validate_projects(project_payload)
+        if project_errors:
+            flash(f"Project config validation failed: {'; '.join(project_errors)}", "danger")
+            project_form_failed = True
+        else:
             try:
-                refresh_scheduler()
+                write_projects_config(projects_config_path, project_payload)
             except Exception as exc:
-                logging.warning("Setup saved but scheduler reload skipped: %s", safe_exception_text(exc))
-            flash("Setup saved successfully.", "ok")
-            return redirect(url_for("home"))
-        except Exception as exc:
-            flash(f"Failed to save setup: {safe_exception_text(exc)}", "danger")
+                flash(f"Failed to save projects config: {safe_exception_text(exc)}", "danger")
+                project_form_failed = True
+
+        if project_form_failed:
             env_map = updated
+            env_map["_FORM_PRIMARY_PROJECT_NAME"] = project_name
+            env_map["_FORM_PRIMARY_PROJECT_CONTEXT"] = project_context
+            env_map["_FORM_PRIMARY_PROJECT_KEYWORDS"] = project_keywords_raw
+            env_map["_FORM_PROJECTS_CONFIG_FILE"] = str(projects_config_path)
+        else:
+            topics_path = get_topics_path(updated)
+            topics_payload = read_topics_payload(topics_path)
+            topics_payload["projects"] = project_payload
+            topics_path.parent.mkdir(parents=True, exist_ok=True)
+            topics_path.write_text(json.dumps(topics_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            enforce_private_file_permissions(topics_path)
+
+            updated["SETUP_WIZARD_COMPLETED"] = "true"
+            try:
+                write_env_map(updated)
+                try:
+                    refresh_scheduler()
+                except Exception as exc:
+                    logging.warning("Setup saved but scheduler reload skipped: %s", safe_exception_text(exc))
+                if request.form.get("after_save") == "preview":
+                    started, message = start_background_job("dry_run")
+                    if started:
+                        flash("Setup saved. Generating preview now.", "ok")
+                    else:
+                        flash(f"Setup saved, but preview did not start: {message}", "danger")
+                else:
+                    flash("Setup saved successfully.", "ok")
+                return redirect(url_for("home"))
+            except Exception as exc:
+                flash(f"Failed to save setup: {safe_exception_text(exc)}", "danger")
+                env_map = updated
 
     checked_llm = "checked" if env_truthy(env_map.get("ENABLE_LLM_AGENT", "true")) else ""
     checked_gemini_advanced = (
@@ -2458,6 +2682,25 @@ def setup():
         oauth_setup_connect_html = f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Connect Google sign-in</a>'
     else:
         oauth_setup_connect_html = ""
+    selected_mode = str(env_map.get("ONBOARDING_MODE", "preview") or "preview").strip().lower()
+    if selected_mode not in {"preview", "daily"}:
+        selected_mode = "preview"
+    projects_config_path = get_projects_config_path(env_map)
+    projects_from_file, _ = read_projects_config(projects_config_path)
+    primary_project = projects_from_file[0] if projects_from_file else {}
+    form_name = str(env_map.get("_FORM_PRIMARY_PROJECT_NAME", "")).strip()
+    form_context = str(env_map.get("_FORM_PRIMARY_PROJECT_CONTEXT", "")).strip()
+    form_keywords = str(env_map.get("_FORM_PRIMARY_PROJECT_KEYWORDS", "")).strip()
+    primary_project_name = form_name or str(primary_project.get("name", "")).strip()
+    primary_project_context = form_context or str(primary_project.get("context", "")).strip()
+    if form_keywords:
+        primary_project_keywords = form_keywords
+    else:
+        keywords = primary_project.get("keywords", [])
+        if isinstance(keywords, list):
+            primary_project_keywords = ", ".join(str(item).strip() for item in keywords if str(item).strip())
+        else:
+            primary_project_keywords = ""
     send_hour_padded = str(env_map.get("SEND_HOUR", "9")).zfill(2)
     send_minute_padded = str(env_map.get("SEND_MINUTE", "0")).zfill(2)
 
@@ -2472,10 +2715,49 @@ def setup():
 
     <form method="post">
       <input type="hidden" name="app_token" value="{APP_AUTH_TOKEN}" />
+      <input type="hidden" name="PROJECTS_CONFIG_FILE" value="{html.escape(str(projects_config_path), quote=True)}" />
 
       <div class="card">
-        <p class="card-title">1) Email / Schedule</p>
-        <p class="small" style="margin:0 0 12px;">For Gmail authentication, complete either <strong>App Password</strong> or <strong>Google OAuth</strong>.</p>
+        <p class="card-title">1) Mode</p>
+        <div class="settings-row">
+          <div class="settings-label"><strong>Onboarding mode</strong><small>Preview-first is recommended.</small></div>
+          <select name="ONBOARDING_MODE" id="onboarding_mode" style="width:220px;">
+            <option value="preview" {"selected" if selected_mode == "preview" else ""}>Preview mode (recommended)</option>
+            <option value="daily" {"selected" if selected_mode == "daily" else ""}>Daily automation mode</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">2) Project description (required)</p>
+        <p class="small" style="margin:0 0 12px;">This is stored in tracked config <code>{html.escape(str(projects_config_path))}</code> and used to auto-generate search queries.</p>
+        <div class="settings-grid">
+          <div class="settings-row">
+            <div class="settings-label"><strong>What are you working on?</strong><small>Project title</small></div>
+            <input type="text" name="PRIMARY_PROJECT_NAME" value="{html.escape(primary_project_name, quote=True)}" placeholder="e.g., Endoscopy foundation model" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Project context</strong><small>Current goal, methods, and constraints</small></div>
+            <textarea name="PRIMARY_PROJECT_CONTEXT" rows="4" placeholder="Describe your active research focus in plain English.">{html.escape(primary_project_context)}</textarea>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Optional keywords</strong><small>Comma separated</small></div>
+            <input type="text" name="PRIMARY_PROJECT_KEYWORDS" value="{html.escape(primary_project_keywords, quote=True)}" placeholder="e.g., colonoscopy, weak supervision, transformer" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Papers per digest</strong><small>MAX_PAPERS</small></div>
+            <input type="number" min="1" max="50" name="MAX_PAPERS" value="{esc('MAX_PAPERS')}" style="width:120px;" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Summary output language</strong><small>OUTPUT_LANGUAGE — e.g., en, ko, ja, es, fr</small></div>
+            <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" style="width:120px;" />
+          </div>
+        </div>
+      </div>
+
+      <details class="card" {"open" if selected_mode == "daily" else ""}>
+        <summary style="cursor:pointer; font-weight:600;">3) Automation + email transport (advanced)</summary>
+        <p class="small" style="margin:10px 0 12px;">For Gmail authentication, complete either <strong>App Password</strong> or <strong>Google OAuth</strong>.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label"><strong>Gmail address</strong></div>
@@ -2522,10 +2804,10 @@ def setup():
             <input type="number" min="1" name="SENT_HISTORY_DAYS" value="{esc('SENT_HISTORY_DAYS')}" style="width:140px;" />
           </div>
         </div>
-      </div>
+      </details>
 
       <div class="card">
-        <p class="card-title">2) LLM/API (optional)</p>
+        <p class="card-title">4) LLM/API (optional)</p>
         <p class="small" style="margin:0 0 12px;">Works in keyword-only fallback mode even without API keys.</p>
         <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Bundled Google OAuth client: <strong>{oauth_bundle_ready_text}</strong> (current source: {html.escape(oauth_source_text)})</p>
         <p class="small" style="margin:0 0 12px;" {oauth_section_style}>OAuth is currently hidden in the default app-password-first path.</p>
@@ -2541,10 +2823,6 @@ def setup():
           <div class="settings-row">
             <div class="settings-label"><strong>Gemini model</strong></div>
             <input type="text" name="GEMINI_MODEL" value="{esc('GEMINI_MODEL')}" />
-          </div>
-          <div class="settings-row">
-            <div class="settings-label"><strong>Summary output language</strong><small>OUTPUT_LANGUAGE — e.g., en, ko, ja, es, fr</small></div>
-            <input type="text" name="OUTPUT_LANGUAGE" value="{esc('OUTPUT_LANGUAGE')}" />
           </div>
           <div class="settings-row">
             <div class="settings-label"><strong>Enable advanced reasoning</strong><small>ENABLE_GEMINI_ADVANCED_REASONING — force Gemini 3.1 Pro</small></div>
@@ -2624,7 +2902,7 @@ def setup():
       </div>
 
       <div class="card">
-        <p class="card-title">3) Web security (optional)</p>
+        <p class="card-title">5) Web security (optional)</p>
         <div class="settings-row">
           <div class="settings-label"><strong>Web console password</strong><small>Required for remote access (0.0.0.0)</small></div>
           <input type="password" name="WEB_PASSWORD" value="" autocomplete="new-password" />
@@ -2640,13 +2918,14 @@ def setup():
       </div>
 
       <div class="card">
-        <p class="card-title">4) Connectivity checks</p>
+        <p class="card-title">6) Connectivity checks</p>
         <button type="button" class="btn-ghost" onclick="runHealthcheck()">Run connectivity checks</button>
         <pre id="healthcheck-result" style="margin-top:10px; white-space:pre-wrap;">Not run yet</pre>
       </div>
 
       <div class="gap-8">
-        <button type="submit">✅ Save setup</button>
+        <button type="submit" name="after_save" value="preview">✅ Save and Preview Now</button>
+        <button type="submit" name="after_save" value="save" class="btn-ghost">Save only</button>
       </div>
     </form>
 

@@ -24,6 +24,7 @@ import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import dotenv_values, load_dotenv
 from xml.etree import ElementTree
+from projects_config import DEFAULT_PROJECTS_CONFIG_FILE, read_projects_config
 
 try:
     import keyring
@@ -2688,9 +2689,43 @@ def run_digest(
         output_language=config.output_language,
         stats=stats,
     )
+    preview_payload = {
+        "subject": subject,
+        "generated_at_utc": now_utc.isoformat(),
+        "timezone": config.timezone_name,
+        "send_frequency": config.send_frequency,
+        "output_language": config.output_language,
+        "paper_count": len(papers),
+        "papers": [
+            {
+                "paper_id": paper.paper_id,
+                "title": paper.title,
+                "source": paper.source,
+                "score": paper.score,
+                "url": paper.url,
+                "published_at_utc": paper.published_at_utc.isoformat() if paper.published_at_utc else "",
+                "authors": paper.authors,
+                "summary_relevance": paper.llm_relevance_text,
+                "summary_core": paper.llm_core_point_text,
+                "summary_usefulness": paper.llm_usefulness_text,
+            }
+            for paper in papers
+        ],
+        "diagnostics": build_diagnostics_lines(stats),
+        "text_preview": text_body,
+        "html_preview": html_body,
+    }
 
     if dry_run:
         logging.info("Dry run enabled. Skipping email sending.")
+        preview_path = get_default_data_dir() / "digest_preview.json"
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_text(
+            json.dumps(preview_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        enforce_private_file_permissions(preview_path)
+        logging.info("Preview payload saved: %s", preview_path)
         if print_dry_run_output:
             output_encoding = sys.stdout.encoding or "utf-8"
             safe_text = text_body.encode(output_encoding, errors="replace").decode(
@@ -2949,8 +2984,10 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN", ""),
     )
     ncbi_api_key = os.getenv("NCBI_API_KEY", "").strip()
+    projects_config_file = os.getenv("PROJECTS_CONFIG_FILE", DEFAULT_PROJECTS_CONFIG_FILE).strip() or DEFAULT_PROJECTS_CONFIG_FILE
     user_topics_file = os.getenv("USER_TOPICS_FILE", "user_topics.json").strip() or "user_topics.json"
     user_topics_path = resolve_topics_file_path(user_topics_file, env_path=env_path)
+    projects_config_path = resolve_topics_file_path(projects_config_file, env_path=env_path)
     enable_semantic_scholar = os.getenv("ENABLE_SEMANTIC_SCHOLAR", "true").strip().lower() in {
         "1",
         "true",
@@ -3067,6 +3104,28 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         semantic_queries,
         google_scholar_queries,
     ) = load_topic_configuration(str(user_topics_path))
+    if not research_projects:
+        file_projects, project_errors = read_projects_config(projects_config_path)
+        if project_errors:
+            logging.info("Projects config fallback skipped: %s", "; ".join(project_errors))
+        else:
+            for project in file_projects:
+                name = clean_text(str(project.get("name", "")))
+                context = clean_text(str(project.get("context", "")))
+                keywords_raw = project.get("keywords", [])
+                if isinstance(keywords_raw, list):
+                    keywords = [clean_text(str(item)) for item in keywords_raw if clean_text(str(item))]
+                elif isinstance(keywords_raw, str):
+                    keywords = [clean_text(part) for part in keywords_raw.split(",") if clean_text(part)]
+                else:
+                    keywords = []
+                merged_context = (
+                    f"{context} | Keywords: {', '.join(keywords)}"
+                    if context and keywords
+                    else (context or f"Keywords: {', '.join(keywords)}")
+                )
+                if name and merged_context:
+                    research_projects.append(ResearchProject(name=name, context=merged_context))
 
     try:
         ZoneInfo(timezone_name)

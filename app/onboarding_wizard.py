@@ -8,8 +8,12 @@ from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
     bootstrap_runtime_files,
     enforce_private_file_permissions,
+    get_default_data_dir,
+    run_digest,
+    load_config,
     store_secret_value,
 )
+from projects_config import DEFAULT_PROJECTS_CONFIG_FILE, write_projects_config
 
 
 DEFAULT_PROJECTS = [
@@ -209,7 +213,9 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
         f"MAX_SEARCH_QUERIES_PER_SOURCE={values_to_write['MAX_SEARCH_QUERIES_PER_SOURCE']}",
         "",
         f"NCBI_API_KEY={values_to_write['NCBI_API_KEY']}",
+        f"PROJECTS_CONFIG_FILE={values_to_write['PROJECTS_CONFIG_FILE']}",
         f"USER_TOPICS_FILE={values_to_write['USER_TOPICS_FILE']}",
+        f"ONBOARDING_MODE={values_to_write['ONBOARDING_MODE']}",
         f"WEB_PASSWORD={values_to_write['WEB_PASSWORD']}",
         f"ALLOW_INSECURE_REMOTE_WEB={values_to_write['ALLOW_INSECURE_REMOTE_WEB']}",
         f"USE_KEYRING={values_to_write['USE_KEYRING']}",
@@ -243,128 +249,87 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
 
 
 def main() -> int:
-    print("=== Paper Digest Onboarding Wizard ===")
+    print("=== Paper Morning Preview-First Onboarding Wizard ===")
     env_path, _ = bootstrap_runtime_files()
-    print("This wizard will create .env and user_topics.json.\n")
+    print("This wizard creates .env + config/projects.yaml + user_topics.json.\n")
     print(f"Env path: {env_path}\n")
 
-    gmail_address = prompt_text("Gmail address", required=True)
-    recipient_email = prompt_text("Recipient email", default=gmail_address, required=True)
-    enable_google_oauth = prompt_yes_no(
-        "Enable Google OAuth Gmail integration? (recommended for no-app-password setup)",
-        default_yes=False,
-    )
-    if enable_google_oauth:
-        print("Google OAuth mode selected. You can leave app password empty.")
-        print("Refresh token will be saved after clicking 'Connect Google OAuth' in Web Console.\n")
-        gmail_app_password = prompt_text(
-            "Gmail App Password (optional fallback, can be blank)",
-            default="",
-            required=False,
-            secret=True,
-        )
-    else:
-        gmail_app_password = prompt_text("Gmail App Password (16 chars)", required=True, secret=True)
+    print("[Step 1] Project description")
+    project_name = prompt_text("What are you working on? (project name)", required=True)
+    project_context = prompt_text("Project context (goal/method/constraints)", required=True)
+    project_keywords = parse_keywords(prompt_text("Optional keywords (comma separated)", default=""))
+    projects = [{"name": project_name, "context": project_context, "keywords": project_keywords}]
 
+    print("\n[Step 2] Preview defaults")
+    max_papers = prompt_int("How many papers per digest?", 5, 1, 50)
+    output_language = prompt_text("Output language (en/ko/ja/es/...)", default="en")
+
+    print("\n[Step 3] LLM key for query generation + summaries")
+    gemini_api_key = prompt_text("Gemini API key (required for preview-first flow)", required=True, secret=True)
+    enable_gemini_advanced_reasoning = prompt_yes_no(
+        "Use advanced reasoning mode (Gemini 3.1 Pro)?",
+        default_yes=True,
+    )
+    gemini_model = prompt_text("Gemini model", default="gemini-3.1-flash")
+    enable_cerebras_fallback = prompt_yes_no(
+        "Enable Cerebras fallback when Gemini fails?",
+        default_yes=True,
+    )
+    cerebras_api_key = ""
+    cerebras_model = "gpt-oss-120b"
+    cerebras_api_base = CEREBRAS_API_BASE_DEFAULT
+    if enable_cerebras_fallback:
+        cerebras_api_key = prompt_text("Cerebras API key (optional)", default="", required=False, secret=True)
+        cerebras_model = prompt_text("Cerebras model", default="gpt-oss-120b")
+        cerebras_api_base = prompt_text("Cerebras API base", default=CEREBRAS_API_BASE_DEFAULT)
+
+    print("\n[Step 4] Optional daily automation settings")
     timezone_name = prompt_text("Timezone (e.g. America/New_York, Europe/London, Asia/Seoul)", default="UTC")
     send_hour = prompt_int("Send hour (0-23)", 9, 0, 23)
     send_minute = prompt_int("Send minute (0-59)", 0, 0, 59)
+    configure_email_now = prompt_yes_no("Configure email delivery now?", default_yes=False)
 
-    lookback_hours = prompt_int("Lookback hours", 24, 1, 720)
-    max_papers = prompt_int("Max papers per email", 5, 1, 200)
-    min_relevance_score = prompt_float("Min relevance score", 6.0, 0.0)
-    arxiv_max = prompt_int("arXiv max results per query", 25, 1, 500)
-    pubmed_max = prompt_int("PubMed max IDs per query", 25, 1, 500)
-    enable_semantic_scholar = prompt_yes_no("Enable Semantic Scholar source?", default_yes=True)
-    semantic_scholar_api_key = prompt_text(
-        "Semantic Scholar API key (optional, improves quota)",
-        default="",
-        required=False,
-        secret=True,
-    )
-    semantic_scholar_max_results = prompt_int(
-        "Semantic Scholar max results per query",
-        20,
-        1,
-        100,
-    )
-    max_search_queries = prompt_int("Max search queries per source", 4, 1, 20)
-    send_now_cooldown_seconds = prompt_int("Send-now cooldown seconds", 300, 0, 86400)
-    sent_history_days = prompt_int("Duplicate history days", 14, 1, 365)
-    ncbi_api_key = prompt_text("NCBI API key (optional, improves PubMed throughput)", default="")
-    web_password = prompt_text(
-        "Web console password (optional, required only for non-local host)",
-        default="",
-        secret=True,
-    )
-    allow_insecure_remote_web = prompt_yes_no(
-        "Allow insecure remote web host (0.0.0.0) without TLS? (NOT recommended)",
-        default_yes=False,
-    )
-    use_keyring = prompt_yes_no(
-        "Store secrets in OS keychain when available?",
-        default_yes=True,
-    )
+    gmail_address = ""
+    recipient_email = ""
+    gmail_app_password = ""
+    enable_google_oauth = False
     google_oauth_use_for_gmail = True
     google_oauth_client_id = ""
     google_oauth_client_secret = ""
     google_oauth_redirect_uri = ""
-    if enable_google_oauth:
-        google_oauth_client_id = prompt_text("Google OAuth Client ID", required=True)
-        google_oauth_client_secret = prompt_text("Google OAuth Client Secret", required=True, secret=True)
-        google_oauth_redirect_uri = prompt_text(
-            "Google OAuth Redirect URI (leave empty to use local default)",
-            default="",
-            required=False,
-        )
-    enable_llm_summary = prompt_yes_no("Enable Gemini research assistant mode?", default_yes=True)
-    gemini_api_key = ""
-    enable_gemini_advanced_reasoning = True
-    gemini_model = "gemini-3.1-flash"
-    output_language = "en"
-    enable_cerebras_fallback = True
-    cerebras_api_key = ""
-    cerebras_model = "gpt-oss-120b"
-    cerebras_api_base = CEREBRAS_API_BASE_DEFAULT
-    gemini_max_papers = 5
-    llm_relevance_threshold = 7.0
-    llm_batch_size = 8
-    llm_max_candidates = 30
-    if enable_llm_summary:
-        gemini_api_key = prompt_text("Gemini API key", required=True, secret=True)
-        enable_gemini_advanced_reasoning = prompt_yes_no(
-            "Use advanced reasoning mode (Gemini 3.1 Pro)?",
-            default_yes=True,
-        )
-        gemini_model = prompt_text("Gemini model", default="gemini-3.1-flash")
-        output_language = prompt_text(
-            "Summary output language code (e.g., en, ko, ja, es)",
-            default="en",
-        )
-        enable_cerebras_fallback = prompt_yes_no(
-            "Enable Cerebras fallback when Gemini fails?",
-            default_yes=True,
-        )
-        if enable_cerebras_fallback:
-            cerebras_api_key = prompt_text(
-                "Cerebras API key (optional, set now or later in Settings)",
+    if configure_email_now:
+        gmail_address = prompt_text("Gmail address", required=True)
+        recipient_email = prompt_text("Recipient email", default=gmail_address, required=True)
+        enable_google_oauth = prompt_yes_no("Enable Google OAuth Gmail integration?", default_yes=False)
+        if enable_google_oauth:
+            google_oauth_client_id = prompt_text("Google OAuth Client ID", required=True)
+            google_oauth_client_secret = prompt_text("Google OAuth Client Secret", required=True, secret=True)
+            google_oauth_redirect_uri = prompt_text(
+                "Google OAuth Redirect URI (optional)",
                 default="",
                 required=False,
-                secret=True,
             )
-            cerebras_model = prompt_text("Cerebras model", default="gpt-oss-120b")
-            cerebras_api_base = prompt_text(
-                "Cerebras API base",
-                default=CEREBRAS_API_BASE_DEFAULT,
-            )
-        gemini_max_papers = prompt_int("Max papers kept after LLM scoring", 5, 1, 200)
-        llm_relevance_threshold = prompt_float("LLM relevance pass threshold (1-10)", 7.0, 1.0)
-        llm_batch_size = prompt_int("LLM batch size", 5, 1, 50)
-        llm_max_candidates = prompt_int("Max candidates for LLM scoring", 30, 1, 80)
+            gmail_app_password = prompt_text("Gmail App Password (optional fallback)", default="", secret=True)
+        else:
+            gmail_app_password = prompt_text("Gmail App Password (16 chars)", required=True, secret=True)
 
-    topics = collect_topics()
-    projects = collect_projects()
+    use_keyring = prompt_yes_no("Store secrets in OS keychain when available?", default_yes=True)
+
+    lookback_hours = 24
+    min_relevance_score = 6.0
+    arxiv_max = 25
+    pubmed_max = 25
+    enable_semantic_scholar = True
+    semantic_scholar_api_key = ""
+    semantic_scholar_max_results = 20
+    max_search_queries = 4
+    send_now_cooldown_seconds = 300
+    sent_history_days = 14
+    ncbi_api_key = ""
+    web_password = ""
+    allow_insecure_remote_web = False
     topics_file = "user_topics.json"
+    projects_config_file = DEFAULT_PROJECTS_CONFIG_FILE
 
     env_values = {
         "GMAIL_ADDRESS": gmail_address,
@@ -388,7 +353,9 @@ def main() -> int:
         "GOOGLE_SCHOLAR_MAX_RESULTS_PER_QUERY": "10",
         "MAX_SEARCH_QUERIES_PER_SOURCE": str(max_search_queries),
         "NCBI_API_KEY": ncbi_api_key,
+        "PROJECTS_CONFIG_FILE": projects_config_file,
         "USER_TOPICS_FILE": topics_file,
+        "ONBOARDING_MODE": "preview",
         "WEB_PASSWORD": web_password,
         "ALLOW_INSECURE_REMOTE_WEB": "true" if allow_insecure_remote_web else "false",
         "USE_KEYRING": "true" if use_keyring else "false",
@@ -402,7 +369,7 @@ def main() -> int:
         "SETUP_WIZARD_COMPLETED": "true",
         "SEND_NOW_COOLDOWN_SECONDS": str(send_now_cooldown_seconds),
         "SENT_HISTORY_DAYS": str(sent_history_days),
-        "ENABLE_LLM_AGENT": "true" if enable_llm_summary else "false",
+        "ENABLE_LLM_AGENT": "true",
         "GEMINI_API_KEY": gemini_api_key,
         "ENABLE_GEMINI_ADVANCED_REASONING": "true" if enable_gemini_advanced_reasoning else "false",
         "GEMINI_MODEL": gemini_model,
@@ -411,13 +378,14 @@ def main() -> int:
         "CEREBRAS_API_KEY": cerebras_api_key,
         "CEREBRAS_MODEL": cerebras_model,
         "CEREBRAS_API_BASE": cerebras_api_base,
-        "GEMINI_MAX_PAPERS": str(gemini_max_papers),
-        "LLM_RELEVANCE_THRESHOLD": str(llm_relevance_threshold),
-        "LLM_BATCH_SIZE": str(llm_batch_size),
-        "LLM_MAX_CANDIDATES": str(llm_max_candidates),
+        "GEMINI_MAX_PAPERS": "5",
+        "LLM_RELEVANCE_THRESHOLD": "7",
+        "LLM_BATCH_SIZE": "5",
+        "LLM_MAX_CANDIDATES": "30",
     }
 
     topics_path = (env_path.parent / topics_file).resolve()
+    projects_path = (env_path.parent / projects_config_file).resolve()
 
     if env_path.exists():
         backup = env_path.with_name(env_path.name + ".bak")
@@ -430,33 +398,34 @@ def main() -> int:
         print(f"Existing {topics_file} backed up to: {backup}")
 
     write_env_file(env_path, env_values)
+    write_projects_config(projects_path, projects)
     topics_path.write_text(
-        json.dumps({"projects": projects, "topics": topics}, indent=2, ensure_ascii=False),
+        json.dumps({"projects": projects, "topics": []}, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    query_count = 0
-    for topic in topics:
-        if not isinstance(topic, dict):
-            continue
-        if (
-            str(topic.get("arxiv_query", "")).strip()
-            or str(topic.get("pubmed_query", "")).strip()
-            or str(topic.get("semantic_scholar_query", "")).strip()
-        ):
-            query_count += 1
+    enforce_private_file_permissions(topics_path)
 
-    print("\nSetup complete.")
+    print("\nSetup complete (preview-first).")
     print(f"Saved env: {env_path}")
-    print(f"Saved topics: {topics_path}")
-    if query_count == 0:
-        print(
-            "No search query configured yet. Open Topic Editor and run 'Keyword / Query Generation' "
-            "or enter queries manually before Send Now."
-        )
-    print("Next steps:")
-    print("1) python app/paper_digest_app.py --run-once --dry-run")
-    print("2) python app/paper_digest_app.py --run-once")
-    print("3) python app/paper_digest_app.py  (always-on scheduler mode)")
+    print(f"Saved projects config: {projects_path}")
+    print(f"Saved topics scaffold: {topics_path}")
+    print("Next steps (recommended):")
+    print("1) python app/web_app.py --host 127.0.0.1 --port 5050")
+    print("2) Open /setup, click 'Save and Preview Now'")
+    print("3) After preview quality check, enable daily automation settings")
+
+    if prompt_yes_no("Run local dry-run preview now? (topics must be generated first in web setup)", default_yes=False):
+        try:
+            config = load_config(require_email_credentials=False)
+            output = run_digest(config, dry_run=True, print_dry_run_output=False)
+            preview_file = get_default_data_dir() / "onboarding_preview.txt"
+            preview_file.parent.mkdir(parents=True, exist_ok=True)
+            preview_file.write_text(output, encoding="utf-8")
+            print(f"Dry-run completed. Preview text saved: {preview_file}")
+        except Exception as exc:
+            print(f"Dry-run preview failed: {exc}")
+            print("Tip: open Web Setup and generate preview once to bootstrap topic queries.")
+
     return 0
 
 
