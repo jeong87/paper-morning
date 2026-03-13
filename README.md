@@ -1,6 +1,6 @@
 ﻿# Paper Morning
 
-[![Paper Morning Logo](assets/papermorning2.png)](https://jeong87.github.io/paper-morning/demo/)
+[![Paper Morning Logo](assets/papermorning2.png)](https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html)
 
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
 It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
@@ -9,13 +9,13 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
-## Live Demo
-<a href="https://jeong87.github.io/paper-morning/demo/">Open Live Demo</a>
+## Template sample
+<a href="https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html">Open Template sample</a>
 
 ## Try Web Preview (No Download)
 If you want to test the digest style in browser first:
 
-- <a href="https://jeong87.github.io/paper-morning/preview/">Open Web Preview</a>
+- <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index.html">Open Web Preview</a>
 
 What it does:
 - Enter project info + Gemini API key
