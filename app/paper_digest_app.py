@@ -106,6 +106,7 @@ class Paper:
     llm_relevance_text: str = ""
     llm_core_point_text: str = ""
     llm_usefulness_text: str = ""
+    llm_evidence_spans: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1772,14 +1773,16 @@ def annotate_papers_with_llm(
             )
 
         prompt = (
-            "You are a personalized research assistant for a medical-AI PhD researcher.\n"
+            "You are a personalized research assistant.\n"
+            "Evaluate how relevant each paper is to the user's research projects.\n"
             "Project context:\n"
             f"{project_context}\n\n"
             "For each paper, do the following:\n"
             "1) score relevance from 1 to 10\n"
             f"2) write one short relevance reason in {output_language}\n"
             f"3) write core-point summary in {output_language} using 3-4 short lines\n"
-            f"4) write usefulness explanation in {output_language} using 3-4 short lines\n\n"
+            f"4) write usefulness explanation in {output_language} using 3-4 short lines\n"
+            "5) provide 1-3 evidence spans (exact short phrases copied from title/abstract)\n\n"
             "Return ONLY JSON object:\n"
             "{\n"
             '  "items": [\n'
@@ -1788,11 +1791,21 @@ def annotate_papers_with_llm(
             '      "relevance_score": 1,\n'
             '      "relevance_reason": "...",\n'
             '      "core_point": "...",\n'
-            '      "usefulness": "..."\n'
+            '      "usefulness": "...",\n'
+            '      "evidence_spans": ["...", "..."]\n'
             "    }\n"
             "  ]\n"
             "}\n"
-            "Rules:\n"
+            "Scoring policy (strict):\n"
+            "- Hard-cap A: if 2 or more of these mismatch with project context, score must be <= 5:\n"
+            "  disease/population, modality/data type, task/clinical objective.\n"
+            "- Hard-cap B: if overlap is only generic terms (e.g., 'medical AI', 'foundation model') "
+            "without concrete project fit, score must be <= 4.\n"
+            "- score >= 7 is allowed only when there is direct overlap in experiment design, dataset, "
+            "or clinical context with the user's project.\n"
+            "- 9-10 must be rare and reserved for near-direct project matches.\n"
+            "- Calibrate to avoid score inflation: unless this batch is unusually strong, most papers "
+            "should stay in the mid-range (about 3-6).\n"
             "- score must be integer 1..10\n"
             f"- score >= {min_score:.1f} means pass\n"
             "- do not hallucinate beyond title and abstract\n"
@@ -1813,6 +1826,22 @@ def annotate_papers_with_llm(
                 score = float(item.get("relevance_score", 0))
             except (TypeError, ValueError):
                 score = 0.0
+            evidence_spans: List[str] = []
+            evidence_raw = item.get("evidence_spans", [])
+            if isinstance(evidence_raw, list):
+                for span in evidence_raw[:3]:
+                    text = clean_text(str(span))
+                    if text:
+                        evidence_spans.append(text[:220])
+            elif isinstance(evidence_raw, str):
+                for span in re.split(r"[\n;]+", evidence_raw):
+                    text = clean_text(span)
+                    if text:
+                        evidence_spans.append(text[:220])
+                    if len(evidence_spans) >= 3:
+                        break
+            if score >= 7.0 and not evidence_spans:
+                score = 6.0
             paper.score = max(0.0, min(10.0, score))
             paper.llm_relevance_text = clean_text(
                 str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
@@ -1823,6 +1852,7 @@ def annotate_papers_with_llm(
             paper.llm_usefulness_text = clean_text(
                 str(item.get("usefulness", item.get("usefulness_ko", "")))
             )
+            paper.llm_evidence_spans = evidence_spans
             paper.topic = "LLM-Relevance"
 
     selected = [paper for paper in papers if paper.score >= min_score]
@@ -2708,6 +2738,7 @@ def run_digest(
                 "summary_relevance": paper.llm_relevance_text,
                 "summary_core": paper.llm_core_point_text,
                 "summary_usefulness": paper.llm_usefulness_text,
+                "summary_evidence_spans": paper.llm_evidence_spans,
             }
             for paper in papers
         ],
