@@ -12,6 +12,21 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 ## Live Demo
 <a href="https://jeong87.github.io/paper-morning/demo/">Open Live Demo</a>
 
+## Try Web Preview (No Download)
+If you want to test the digest style in browser first:
+
+- <a href="https://jeong87.github.io/paper-morning/preview/">Open Web Preview</a>
+
+What it does:
+- Enter project info + Gemini API key
+- Generates a digest-like preview
+- Opens email-style HTML in a new browser tab
+
+Notes:
+- Client-side only (runs in your browser)
+- No actual email is sent from this page
+- Use this as a quick quality check before local install
+
 ## What It Does
 1. Reads your project context and saved search queries.
 2. Collects papers from arXiv, PubMed, Semantic Scholar, and optional Google Scholar (SerpAPI).

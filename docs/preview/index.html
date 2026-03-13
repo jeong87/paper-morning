@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paper Morning Web Preview</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --line: #dfe3e8;
+      --text: #1f2937;
+      --sub: #6b7280;
+      --brand: #245339;
+      --brand-2: #2d6a47;
+      --danger: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 0%, #eef6f1 0%, var(--bg) 40%, #edf2f8 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.45;
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 28px 16px 60px;
+    }
+    .hero {
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: -0.02em;
+    }
+    .muted { color: var(--sub); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+    .label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin: 0 0 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid #cfd6de;
+      border-radius: 8px;
+      padding: 10px 11px;
+      font-size: 14px;
+      background: #fff;
+      color: #111827;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    button, .link-btn {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      color: white;
+    }
+    .btn-ghost, .link-btn {
+      border: 1px solid #cfd6de;
+      background: white;
+      color: #1f2937;
+    }
+    .status {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--sub);
+      white-space: pre-wrap;
+    }
+    .danger { color: var(--danger); }
+    code {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      padding: 1px 6px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 1fr; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>Paper Morning Web Preview</h1>
+      <p class="muted">
+        No local download, no email sending. Enter your project + Gemini key and open a
+        browser preview that looks like the digest email format.
+      </p>
+      <p class="muted">
+        This page runs fully in your browser (client-side). Your API key is not sent to this repository server.
+      </p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <label class="label" for="projectName">Project Name</label>
+        <input id="projectName" type="text" placeholder="e.g., Endoscopy foundation model triage" />
+
+        <label class="label" for="projectContext" style="margin-top:12px;">Project Context</label>
+        <textarea id="projectContext" placeholder="Describe your current research goal, approach, and what papers you want to see."></textarea>
+
+        <label class="label" for="keywords" style="margin-top:12px;">Optional Keywords</label>
+        <input id="keywords" type="text" placeholder="e.g., endoscopy, multimodal, weak supervision, triage" />
+
+        <div class="row" style="margin-top:12px;">
+          <div>
+            <label class="label" for="outputLang">Output Language</label>
+            <select id="outputLang">
+              <option value="en">English</option>
+              <option value="ko">Korean</option>
+              <option value="ja">Japanese</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="paperCount">Preview Papers</label>
+            <input id="paperCount" type="number" value="3" min="1" max="5" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label class="label" for="apiKey">Gemini API Key</label>
+        <input id="apiKey" type="password" placeholder="AIza..." autocomplete="off" />
+
+        <div class="row" style="margin-top:12px;">
+          <div>
+            <label class="label" for="model">Gemini Model</label>
+            <input id="model" type="text" value="gemini-2.5-flash" />
+          </div>
+          <div>
+            <label class="label" for="windowHours">Lookback Window (hours)</label>
+            <input id="windowHours" type="number" value="24" min="1" max="168" />
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top:14px;">
+          <button class="btn-primary" id="runBtn">Generate Preview (new tab)</button>
+          <button class="btn-ghost" id="openLastBtn" type="button">Open Last Preview</button>
+          <a class="link-btn" href="https://github.com/jeong87/paper-morning" target="_blank" rel="noopener noreferrer">Open Repository</a>
+        </div>
+
+        <div id="status" class="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const runBtn = document.getElementById("runBtn");
+    const openLastBtn = document.getElementById("openLastBtn");
+    const statusEl = document.getElementById("status");
+    const storageKey = "pm_web_preview_last_html_v1";
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.className = isError ? "status danger" : "status";
+    }
+
+    function extractJsonBlock(rawText) {
+      const text = String(rawText || "").trim();
+      if (!text) return null;
+      try { return JSON.parse(text); } catch (_) {}
+      const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenceMatch && fenceMatch[1]) {
+        try { return JSON.parse(fenceMatch[1].trim()); } catch (_) {}
+      }
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        const candidate = text.slice(start, end + 1);
+        try { return JSON.parse(candidate); } catch (_) {}
+      }
+      return null;
+    }
+
+    function renderPreviewHtml(payload, meta) {
+      const papers = Array.isArray(payload?.papers) ? payload.papers : [];
+      const topScore = papers.reduce((m, p) => Math.max(m, Number(p.score || 0)), 0);
+      const sources = [...new Set(papers.map((p) => p.source || "Unknown"))].join(" | ") || "N/A";
+      const windowText = payload.window || `Last ${meta.windowHours}h`;
+
+      const cards = papers.map((p, idx) => {
+        const title = escapeHtml(p.title || `Untitled #${idx + 1}`);
+        const authors = escapeHtml(p.authors || "N/A");
+        const source = escapeHtml(p.source || "Unknown");
+        const score = Number(p.score || 0).toFixed(1);
+        const url = String(p.url || "").trim();
+        const why = escapeHtml(p.why || "No reason generated.");
+        const core = escapeHtml(p.core || "No core summary generated.");
+        const useful = escapeHtml(p.usefulness || "No usefulness summary generated.");
+        const titleHtml = url
+          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#111827;text-decoration:none;">${title}</a>`
+          : title;
+        return `
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;">
+            <tr><td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#fafaf9;">
+              <div style="font-size:12px;color:#6b7280;font-weight:600;">#${idx + 1} · ${source} · Score ${score}</div>
+            </td></tr>
+            <tr><td style="padding:14px 16px 16px;">
+              <div style="font-size:18px;line-height:1.35;font-weight:700;margin-bottom:8px;">${titleHtml}</div>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">${authors}</div>
+              <div style="padding:10px 12px;border-left:3px solid #245339;background:#eaf5ef;border-radius:6px;margin-bottom:8px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#245339;">Why this matches your work</div>
+                <div style="font-size:13px;color:#334155;margin-top:4px;">${why}</div>
+              </div>
+              <div style="padding:10px 12px;border-left:3px solid #9a8f75;background:#f8f6f1;border-radius:6px;margin-bottom:8px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#766c57;">Key finding</div>
+                <div style="font-size:13px;color:#334155;margin-top:4px;">${core}</div>
+              </div>
+              <div style="padding:10px 12px;border-left:3px solid #557fb3;background:#f2f7fd;border-radius:6px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#476d9a;">How you can use this</div>
+                <div style="font-size:13px;color:#334155;margin-top:4px;">${useful}</div>
+              </div>
+            </td></tr>
+          </table>
+        `;
+      }).join("");
+
+      return `
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paper Morning Preview</title>
+</head>
+<body style="margin:0;background:#e8e6e1;font-family:Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:22px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="700" cellpadding="0" cellspacing="0" style="background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;">
+        <tr><td style="padding:28px 26px 22px;background:linear-gradient(135deg,#1a2f23,#2d5a3d 60%,#3a7a52);color:#fff;">
+          <div style="font-size:24px;font-weight:700;">Paper Morning</div>
+          <div style="font-size:14px;color:#d9e7de;margin-top:6px;">Web Preview (client-side)</div>
+          <div style="font-size:12px;color:#bfd3c8;margin-top:10px;">Window: ${escapeHtml(windowText)}</div>
+          <div style="font-size:12px;color:#bfd3c8;margin-top:4px;">Sources: ${escapeHtml(sources)}</div>
+        </td></tr>
+        <tr><td style="padding:16px 20px 8px;background:#fff;border-bottom:1px solid #e5e3de;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;">
+            <tr>
+              <td align="center" style="padding:10px;border-right:1px solid #e5e3de;">
+                <div style="font-size:22px;font-weight:700;color:#245339;">${escapeHtml(String(payload.scanned || Math.max(papers.length * 8, papers.length)))}</div>
+                <div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">SCANNED</div>
+              </td>
+              <td align="center" style="padding:10px;border-right:1px solid #e5e3de;">
+                <div style="font-size:22px;font-weight:700;color:#245339;">${papers.length}</div>
+                <div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">SELECTED</div>
+              </td>
+              <td align="center" style="padding:10px;">
+                <div style="font-size:22px;font-weight:700;color:#245339;">${topScore.toFixed(1)}</div>
+                <div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">TOP SCORE</div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:14px 20px 4px;">${cards || '<div style="padding:14px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">No papers generated.</div>'}</td></tr>
+        <tr><td style="padding:12px 20px 18px;background:#fff;border-top:1px solid #e5e3de;text-align:center;color:#6b7280;font-size:11px;">
+          Generated in browser only · Project: ${escapeHtml(meta.projectName)} · Language: ${escapeHtml(meta.outputLang)}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+    }
+
+    function buildPrompt(input) {
+      return `
+You are generating a browser preview of a research digest email.
+This is a formatting preview, not a guaranteed factual retrieval pipeline.
+
+Return JSON ONLY with schema:
+{
+  "window": "string",
+  "scanned": number,
+  "papers": [
+    {
+      "title": "string",
+      "authors": "string",
+      "source": "arXiv|PubMed|Semantic Scholar|Google Scholar",
+      "score": number,
+      "url": "https://...",
+      "why": "string",
+      "core": "string",
+      "usefulness": "string"
+    }
+  ]
+}
+
+Constraints:
+- language: ${input.outputLang}
+- papers length: exactly ${input.paperCount}
+- score range: 6.5 to 9.5
+- domain relevance must match project context and keywords
+- keep each reason concise (1-2 sentences)
+- no markdown fences, no extra text outside JSON
+
+Project name: ${input.projectName}
+Project context: ${input.projectContext}
+Keywords: ${input.keywords || "N/A"}
+Lookback window: last ${input.windowHours} hours
+`;
+    }
+
+    async function callGemini(input) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent?key=${encodeURIComponent(input.apiKey)}`;
+      const body = {
+        contents: [{ role: "user", parts: [{ text: buildPrompt(input) }] }],
+        generationConfig: {
+          temperature: 0.3,
+          responseMimeType: "application/json"
+        }
+      };
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Gemini API failed (${resp.status}): ${txt.slice(0, 220)}`);
+      }
+      const payload = await resp.json();
+      const textParts = (((payload || {}).candidates || [])[0]?.content?.parts || [])
+        .map((p) => p.text || "")
+        .join("\n");
+      const parsed = extractJsonBlock(textParts);
+      if (!parsed || !Array.isArray(parsed.papers)) {
+        throw new Error("Failed to parse JSON from Gemini response.");
+      }
+      return parsed;
+    }
+
+    function getInputValues() {
+      return {
+        projectName: document.getElementById("projectName").value.trim(),
+        projectContext: document.getElementById("projectContext").value.trim(),
+        keywords: document.getElementById("keywords").value.trim(),
+        outputLang: document.getElementById("outputLang").value,
+        paperCount: Math.max(1, Math.min(5, Number(document.getElementById("paperCount").value || 3))),
+        apiKey: document.getElementById("apiKey").value.trim(),
+        model: document.getElementById("model").value.trim() || "gemini-2.5-flash",
+        windowHours: Math.max(1, Math.min(168, Number(document.getElementById("windowHours").value || 24))),
+      };
+    }
+
+    runBtn.addEventListener("click", async () => {
+      const input = getInputValues();
+      if (!input.projectName || !input.projectContext) {
+        setStatus("Project name and project context are required.", true);
+        return;
+      }
+      if (!input.apiKey) {
+        setStatus("Gemini API key is required.", true);
+        return;
+      }
+
+      const previewWindow = window.open("about:blank", "pm-web-preview");
+      if (!previewWindow) {
+        setStatus("Popup blocked. Allow popups for this site and try again.", true);
+        return;
+      }
+      previewWindow.document.write("<!doctype html><html><body style='font-family:Arial,sans-serif;padding:20px;'>Generating preview... please wait.</body></html>");
+      previewWindow.document.close();
+
+      runBtn.disabled = true;
+      setStatus("Calling Gemini API and building preview...");
+      try {
+        const llmPayload = await callGemini(input);
+        const html = renderPreviewHtml(llmPayload, input);
+        localStorage.setItem(storageKey, html);
+        previewWindow.document.open();
+        previewWindow.document.write(html);
+        previewWindow.document.close();
+        setStatus("Preview generated successfully. The new tab shows the digest-like email format.");
+      } catch (err) {
+        previewWindow.close();
+        setStatus(String(err && err.message ? err.message : err), true);
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+
+    openLastBtn.addEventListener("click", () => {
+      const cached = localStorage.getItem(storageKey);
+      if (!cached) {
+        setStatus("No local preview cache found yet. Generate one first.", true);
+        return;
+      }
+      const previewWindow = window.open("about:blank", "pm-web-preview");
+      if (!previewWindow) {
+        setStatus("Popup blocked. Allow popups for this site and try again.", true);
+        return;
+      }
+      previewWindow.document.open();
+      previewWindow.document.write(cached);
+      previewWindow.document.close();
+      setStatus("Opened cached preview in a new tab.");
+    });
+  </script>
+</body>
+</html>

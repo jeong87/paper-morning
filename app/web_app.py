@@ -18,7 +18,18 @@ import markdown as md
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import dotenv_values
-from flask import Flask, flash, jsonify, redirect, render_template_string, request, send_file, session, url_for
+from flask import (
+    Flask,
+    Response,
+    flash,
+    jsonify,
+    redirect,
+    render_template_string,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 
 from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
@@ -2068,6 +2079,11 @@ def build_home_body() -> str:
     preview_payload = read_latest_preview_payload()
     preview_rows_html = ""
     preview_papers = preview_payload.get("papers", []) if isinstance(preview_payload, dict) else []
+    has_preview_html = bool(
+        str(preview_payload.get("html_preview", "")).strip()
+        if isinstance(preview_payload, dict)
+        else ""
+    )
     if isinstance(preview_papers, list) and preview_papers:
         rows: List[str] = []
         for idx, paper in enumerate(preview_papers[:5], start=1):
@@ -2186,6 +2202,12 @@ def build_home_body() -> str:
         <span class="action-desc">Runs collection/ranking and shows digest output without sending email.</span>
         <button id="btn-dry" class="btn-success" onclick="startJob('dry_run')">Preview Now</button>
       </div>
+      <div class="action-card">
+        <span class="action-icon">🧾</span>
+        <span class="action-label">Open Email Preview</span>
+        <span class="action-desc">Open the latest digest preview in a new browser tab.</span>
+        <button id="btn-open-preview" class="btn-ghost" onclick="openPreviewTab()" __PREVIEW_BTN_DISABLED__>Open Preview Tab</button>
+      </div>
     </div>
 
     <details class="card" style="margin-top:14px;">
@@ -2248,12 +2270,17 @@ def build_home_body() -> str:
 
     <script>
       let outputVisible = true;
+      let previewWindow = null;
       function toggleOutput() {
         const wrap = document.getElementById('output-wrap');
         const btn = document.getElementById('btn-toggle');
         outputVisible = !outputVisible;
         wrap.style.display = outputVisible ? '' : 'none';
         btn.textContent = outputVisible ? 'Collapse ▲' : 'Expand ▼';
+      }
+
+      function openPreviewTab() {
+        window.open('__PREVIEW_URL__', 'paperMorningPreview');
       }
 
       const JOB_LABEL = { dry_run: 'Preview', send_now: 'Send Now', reload_scheduler: 'Reload Scheduler', register_windows_task: 'Windows Task Register', none: '' };
@@ -2269,7 +2296,7 @@ def build_home_body() -> str:
       }
 
       function setButtonsDisabled(disabled) {
-        ['btn-dry', 'btn-send', 'btn-reload', 'btn-task'].forEach(id => {
+        ['btn-dry', 'btn-send', 'btn-reload', 'btn-task', 'btn-open-preview'].forEach(id => {
           const el = document.getElementById(id);
           if (el) {
             el.disabled = disabled;
@@ -2296,10 +2323,27 @@ def build_home_body() -> str:
         } else {
           badgeEl.innerHTML = '<span class="badge badge-idle">⬜ Idle</span>';
         }
+
+        if (!running && !hasError && kind === 'dry_run' && previewWindow && !previewWindow.closed) {
+          previewWindow.location.href = '__PREVIEW_URL__';
+          previewWindow.focus();
+          previewWindow = null;
+        }
         setButtonsDisabled(running);
       }
 
       async function startJob(kind) {
+        if (kind === 'dry_run') {
+          try {
+            previewWindow = window.open('about:blank', 'paperMorningPreview');
+            if (previewWindow && previewWindow.document) {
+              previewWindow.document.write('<!doctype html><html><head><title>Generating preview...</title></head><body style=\"font-family:sans-serif;padding:20px;\">Generating digest preview...<br/>This tab will update automatically when ready.</body></html>');
+              previewWindow.document.close();
+            }
+          } catch (err) {
+            previewWindow = null;
+          }
+        }
         try {
           const res = await fetch(`__API_START_BASE__/${kind}`, {
             method: 'POST',
@@ -2355,6 +2399,8 @@ def build_home_body() -> str:
         .replace("__OAUTH_CARD_STYLE__", oauth_card_style)
         .replace("__OAUTH_DISCONNECT_URL__", url_for("google_oauth_disconnect"))
         .replace("__API_STATUS__", url_for("jobs_status"))
+        .replace("__PREVIEW_URL__", url_for("preview_latest"))
+        .replace("__PREVIEW_BTN_DISABLED__", "" if has_preview_html else "disabled")
         .replace("__API_START_BASE__", "/jobs/start")
     )
 
@@ -3004,6 +3050,32 @@ def setup_healthcheck():
 @app.route("/")
 def home():
     return render_page(APP_TITLE, build_home_body(), active_page="home")
+
+
+@app.route("/preview/latest", methods=["GET"])
+def preview_latest():
+    payload = read_latest_preview_payload()
+    html_preview = ""
+    if isinstance(payload, dict):
+        html_preview = str(payload.get("html_preview", "") or "").strip()
+    if html_preview:
+        return Response(html_preview, mimetype="text/html; charset=utf-8")
+
+    fallback = """
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Paper Morning Preview</title>
+      </head>
+      <body style="font-family:sans-serif;background:#f8fafc;padding:28px;color:#0f172a;">
+        <h2 style="margin-top:0;">No preview available yet</h2>
+        <p>Run <b>Preview Now</b> first, then open this tab again.</p>
+        <p><a href="/">Back to Dashboard</a></p>
+      </body>
+    </html>
+    """
+    return Response(fallback, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/jobs/start/<kind>", methods=["POST"])
