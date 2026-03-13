@@ -70,7 +70,7 @@ def read_app_version() -> str:
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
-    return "0.5.1"
+    return "0.5.2"
 
 
 APP_VERSION = read_app_version()

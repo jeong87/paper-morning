@@ -2,6 +2,41 @@
 
 All notable changes to **paper-morning** are documented in this file.
 
+## [0.5.2] - 2026-03-13
+
+### Added
+- Added preview-first browser entry path (`docs/preview/index.html`) for no-download onboarding:
+  - input project context + API key in-browser
+  - open generated email-style preview in a new tab
+  - no email send in preview mode
+- Added evidence-aware LLM relevance output:
+  - prompt now requests `evidence_spans` (title/abstract-grounded snippets)
+  - preview payload now includes `summary_evidence_spans`
+
+### Changed
+- Web preview flow now runs the real collection/ranking pipeline (arXiv/PubMed + LLM scoring) instead of static/fake sample content.
+- Preview settings refined for first-impression quality:
+  - selectable Gemini model in preview UI
+  - default model priority aligned to `gemini-3.1-pro` path
+  - preview lookback window expanded to 168h
+  - preview paper count fixed to 3 for concise output
+- README onboarding links updated:
+  - `Live Demo` wording replaced with `Template sample`
+  - `Open Web Preview` link corrected to working path
+- LLM relevance prompt hardened to reduce score inflation:
+  - removed role lock to “medical-AI PhD researcher”
+  - strict hard-cap policy for mismatch/generic-only overlap
+  - score `>= 7` requires direct project overlap in experiment/dataset/clinical context
+  - calibration guidance added to keep typical scores in mid-range unless batch quality is exceptional
+  - defensive gating: if score `>= 7` but evidence is empty, score is downgraded
+
+### Docs
+- Beginner/full manuals were aligned with global onboarding and settings consistency.
+- Version labels updated to `v0.5.2` across README/manual references and email/demo footer text.
+
+### Version
+- App version bumped to `paper-morning v0.5.2`.
+
 ## [0.5.1] - 2026-03-10
 
 ### Changed
