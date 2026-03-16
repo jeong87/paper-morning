@@ -57,6 +57,8 @@ http://127.0.0.1:5050/setup
 6. Go to Dashboard and check:
 - `Latest Preview Output`
 - top paper cards and diagnostics
+- score distribution (`9-10 / 7-8 / 5-6 / 1-4 / 0`)
+- scored paper list (`score | title`) to tune threshold if needed
 
 If this preview looks relevant, move to optional steps below.
 

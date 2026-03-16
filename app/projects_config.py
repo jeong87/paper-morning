@@ -9,6 +9,7 @@ except Exception:  # pragma: no cover - handled by runtime validation path
 
 
 DEFAULT_PROJECTS_CONFIG_FILE = "config/projects.yaml"
+ALLOWED_PROJECT_SEND_FREQUENCIES = {"daily", "every_3_days", "weekly"}
 
 
 def _normalize_keywords(raw: Any) -> List[str]:
@@ -31,6 +32,17 @@ def _normalize_keywords(raw: Any) -> List[str]:
     return deduped
 
 
+def _normalize_project_send_frequency(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value in {"", "1", "1d", "daily"}:
+        return "daily"
+    if value in {"3", "3d", "every_3_days"}:
+        return "every_3_days"
+    if value in {"7", "7d", "weekly"}:
+        return "weekly"
+    return "daily"
+
+
 def normalize_projects_payload(payload: Any) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         raw_projects = payload.get("projects", [])
@@ -46,11 +58,13 @@ def normalize_projects_payload(payload: Any) -> List[Dict[str, Any]]:
         name = str(item.get("name", "")).strip()
         context = str(item.get("context", "")).strip()
         keywords = _normalize_keywords(item.get("keywords", []))
+        send_frequency = _normalize_project_send_frequency(item.get("send_frequency", "daily"))
         if not (name or context):
             continue
         project_entry: Dict[str, Any] = {
             "name": name,
             "context": context,
+            "send_frequency": send_frequency,
         }
         if keywords:
             project_entry["keywords"] = keywords
@@ -68,10 +82,16 @@ def validate_projects(projects: List[Dict[str, Any]]) -> List[str]:
         name = str(project.get("name", "")).strip()
         context = str(project.get("context", "")).strip()
         keywords = project.get("keywords", [])
+        send_frequency = str(project.get("send_frequency", "daily")).strip().lower()
         if not name:
             errors.append(f"Project #{idx}: name is required.")
         if not context:
             errors.append(f"Project #{idx}: context is required.")
+        if send_frequency and send_frequency not in ALLOWED_PROJECT_SEND_FREQUENCIES:
+            errors.append(
+                f"Project #{idx}: send_frequency must be one of "
+                f"{sorted(ALLOWED_PROJECT_SEND_FREQUENCIES)}."
+            )
         if keywords and not isinstance(keywords, list):
             errors.append(f"Project #{idx}: keywords must be a list.")
             continue
@@ -137,4 +157,3 @@ def write_projects_config(path: Path, projects: List[Dict[str, Any]]) -> None:
         path.write_text(dumped, encoding="utf-8")
     else:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-

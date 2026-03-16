@@ -1631,15 +1631,26 @@ def normalize_topics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(topics, list):
         topics = []
 
+    def normalize_project_send_frequency(raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        if value in {"", "1", "1d", "daily"}:
+            return "daily"
+        if value in {"3", "3d", "every_3_days"}:
+            return "every_3_days"
+        if value in {"7", "7d", "weekly"}:
+            return "weekly"
+        return "daily"
+
     clean_projects: List[Dict[str, str]] = []
     for item in projects:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", "")).strip()
         context = str(item.get("context", "")).strip()
+        send_frequency = normalize_project_send_frequency(str(item.get("send_frequency", "daily")))
         if not name and not context:
             continue
-        clean_projects.append({"name": name, "context": context})
+        clean_projects.append({"name": name, "context": context, "send_frequency": send_frequency})
 
     clean_topics: List[Dict[str, Any]] = []
     for item in topics:
@@ -3601,7 +3612,7 @@ def topics():
     <div class="card">
       <h3>1) Projects</h3>
       <table>
-        <thead><tr><th style="width:28%;">Project Name</th><th>Context</th><th style="width:80px;">Action</th></tr></thead>
+        <thead><tr><th style="width:24%;">Project Name</th><th>Context</th><th style="width:150px;">Mail cadence</th><th style="width:80px;">Action</th></tr></thead>
         <tbody id="projects-body"></tbody>
       </table>
       <div style="margin-top:10px;"><button type="button" onclick="addProjectRow()">+ Add Project</button></div>
@@ -3661,10 +3672,18 @@ def topics():
         const tbody = document.getElementById('projects-body');
         tbody.innerHTML = '';
         projects.forEach((row, idx) => {
+          const cadence = (row.send_frequency || 'daily');
           tbody.insertAdjacentHTML('beforeend', `
             <tr>
               <td><input type="text" value="${escHtml(row.name || '')}" oninput="projects[${idx}].name=this.value" /></td>
               <td><input type="text" value="${escHtml(row.context || '')}" oninput="projects[${idx}].context=this.value" /></td>
+              <td>
+                <select onchange="projects[${idx}].send_frequency=this.value">
+                  <option value="daily" ${cadence === 'daily' ? 'selected' : ''}>Daily</option>
+                  <option value="every_3_days" ${cadence === 'every_3_days' ? 'selected' : ''}>Every 3 days</option>
+                  <option value="weekly" ${cadence === 'weekly' ? 'selected' : ''}>Weekly (7 days)</option>
+                </select>
+              </td>
               <td><button type="button" class="btn-danger" onclick="removeProjectRow(${idx})">Delete</button></td>
             </tr>
           `);
@@ -3672,7 +3691,7 @@ def topics():
       }
 
       function addProjectRow() {
-        projects.push({ name: '', context: '' });
+        projects.push({ name: '', context: '', send_frequency: 'daily' });
         renderProjects();
       }
 
@@ -3718,7 +3737,11 @@ def topics():
 
       function normalizedProjects() {
         return projects
-          .map(p => ({ name: (p.name || '').trim(), context: (p.context || '').trim() }))
+          .map(p => ({
+            name: (p.name || '').trim(),
+            context: (p.context || '').trim(),
+            send_frequency: (p.send_frequency || 'daily').trim() || 'daily',
+          }))
           .filter(p => p.name || p.context);
       }
 
@@ -3838,15 +3861,26 @@ def topics_generate():
     if not isinstance(projects, list):
         return jsonify({"message": "Invalid projects payload."}), 400
 
+    def normalize_project_send_frequency(raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        if value in {"", "1", "1d", "daily"}:
+            return "daily"
+        if value in {"3", "3d", "every_3_days"}:
+            return "every_3_days"
+        if value in {"7", "7d", "weekly"}:
+            return "weekly"
+        return "daily"
+
     cleaned_projects: List[Dict[str, str]] = []
     for item in projects:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", "")).strip()
         context = str(item.get("context", "")).strip()
+        send_frequency = normalize_project_send_frequency(str(item.get("send_frequency", "daily")))
         if not (name or context):
             continue
-        cleaned_projects.append({"name": name, "context": context})
+        cleaned_projects.append({"name": name, "context": context, "send_frequency": send_frequency})
 
     if not cleaned_projects:
         return jsonify({"message": "At least one project is required."}), 400

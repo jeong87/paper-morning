@@ -89,6 +89,8 @@ class TopicProfile:
 class ResearchProject:
     name: str
     context: str
+    send_frequency: str = "daily"
+    send_interval_days: int = 1
 
 
 @dataclass
@@ -180,6 +182,8 @@ class DigestStats:
     pass_count: int = 0
     score_buckets: Dict[str, int] = field(default_factory=dict)
     llm_fallback_reason: str = ""
+    llm_fallback_score_buckets: Dict[str, int] = field(default_factory=dict)
+    llm_fallback_scored_examples: List[str] = field(default_factory=list)
     estimated_llm_calls_upper_bound: int = 0
     duplicates_filtered: int = 0
     final_selected: int = 0
@@ -191,6 +195,9 @@ class DigestStats:
     zero_candidate_recovery_steps: List[str] = field(default_factory=list)
     llm_agent_enabled: bool = False
     llm_provider_ready: bool = False
+    scored_examples: List[str] = field(default_factory=list)
+    project_cadence_summary: List[str] = field(default_factory=list)
+    project_cadence_filtered_out: int = 0
 
 
 def mask_sensitive_text(text: str, extra_values: List[str] | None = None) -> str:
@@ -578,6 +585,23 @@ def build_score_buckets(scores: List[float]) -> Dict[str, int]:
     return buckets
 
 
+def build_scored_examples(papers: List["Paper"], limit: int = 25) -> List[str]:
+    if not papers:
+        return []
+    ordered = sorted(
+        papers,
+        key=lambda item: (item.score, item.published_at_utc),
+        reverse=True,
+    )
+    examples: List[str] = []
+    for paper in ordered[: max(1, limit)]:
+        title = clean_text(paper.title)
+        if len(title) > 96:
+            title = title[:93].rstrip() + "..."
+        examples.append(f"{paper.score:.1f} | {title}")
+    return examples
+
+
 def get_sent_history_path() -> Path:
     return (get_default_data_dir() / "sent_ids.json").resolve()
 
@@ -947,12 +971,22 @@ def load_topic_configuration(
             continue
         name = clean_text(str(project.get("name", "")))
         context = clean_text(str(project.get("context", "")))
+        project_send_frequency, project_interval_days = normalize_send_frequency(
+            str(project.get("send_frequency", "daily"))
+        )
         goals = normalize_string_list(project.get("goals"))
         methods = normalize_string_list(project.get("methods"))
         stack = normalize_string_list(project.get("stack"))
         merged = " | ".join(part for part in [context, "; ".join(goals), "; ".join(methods), "; ".join(stack)] if part)
         if name and merged:
-            projects.append(ResearchProject(name=name, context=merged))
+            projects.append(
+                ResearchProject(
+                    name=name,
+                    context=merged,
+                    send_frequency=project_send_frequency,
+                    send_interval_days=project_interval_days,
+                )
+            )
 
     if not projects and profiles:
         for profile in profiles:
@@ -960,6 +994,8 @@ def load_topic_configuration(
                 ResearchProject(
                     name=profile.name,
                     context=f"Keywords: {', '.join(profile.keywords.keys())}",
+                    send_frequency="daily",
+                    send_interval_days=1,
                 )
             )
 
@@ -1755,6 +1791,12 @@ def annotate_papers_with_llm(
         }
 
     project_context = build_project_context_text(config.research_projects)
+    project_name_lookup = {
+        clean_text(project.name).lower(): project.name
+        for project in config.research_projects
+        if clean_text(project.name)
+    }
+    project_names = [name for name in project_name_lookup.values()]
     by_id = {paper.paper_id: paper for paper in papers}
     min_score = config.llm_relevance_threshold
     output_language = output_language_display_name(config.output_language)
@@ -1789,6 +1831,7 @@ def annotate_papers_with_llm(
             "    {\n"
             '      "id": "...",\n'
             '      "relevance_score": 1,\n'
+            '      "project_name": "...",\n'
             '      "relevance_reason": "...",\n'
             '      "core_point": "...",\n'
             '      "usefulness": "...",\n'
@@ -1806,10 +1849,12 @@ def annotate_papers_with_llm(
             "- 9-10 must be rare and reserved for near-direct project matches.\n"
             "- Calibrate to avoid score inflation: unless this batch is unusually strong, most papers "
             "should stay in the mid-range (about 3-6).\n"
+            "- project_name must be one of the provided project names when possible; otherwise use empty string.\n"
             "- score must be integer 1..10\n"
             f"- score >= {min_score:.1f} means pass\n"
             "- do not hallucinate beyond title and abstract\n"
             "- be strict to reduce noisy papers\n\n"
+            f"Allowed project names: {json.dumps(project_names, ensure_ascii=False)}\n\n"
             f"Papers JSON:\n{json.dumps(payload_items, ensure_ascii=False)}"
         )
 
@@ -1853,7 +1898,11 @@ def annotate_papers_with_llm(
                 str(item.get("usefulness", item.get("usefulness_ko", "")))
             )
             paper.llm_evidence_spans = evidence_spans
-            paper.topic = "LLM-Relevance"
+            project_name = clean_text(str(item.get("project_name", "")))
+            if project_name:
+                canonical_name = project_name_lookup.get(project_name.lower())
+                if canonical_name:
+                    paper.topic = canonical_name
 
     selected = [paper for paper in papers if paper.score >= min_score]
     selected.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
@@ -1865,6 +1914,7 @@ def annotate_papers_with_llm(
         "scored_count": len([value for value in scored_values if value > 0]),
         "pass_count": len(selected),
         "score_buckets": build_score_buckets(scored_values),
+        "scored_examples": build_scored_examples(papers, limit=40),
     }
     return selected, metadata
 
@@ -1884,13 +1934,15 @@ def rank_relevant_papers_keyword(
             continue
         ranked.append(paper)
     ranked.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
+    scored_values = [paper.score for paper in scored]
     metadata = {
         "mode": "keyword",
         "threshold": config.min_relevance_score,
         "scoring_candidates": len(scored),
         "scored_count": len(scored),
         "pass_count": len(ranked),
-        "score_buckets": {},
+        "score_buckets": build_score_buckets(scored_values),
+        "scored_examples": build_scored_examples(scored, limit=40),
     }
     return ranked, metadata
 
@@ -1921,6 +1973,7 @@ def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[P
             keyword_meta["llm_fallback_reason"] = "llm_returned_no_pass"
             keyword_meta["llm_threshold"] = config.llm_relevance_threshold
             keyword_meta["llm_score_buckets"] = llm_meta.get("score_buckets", {})
+            keyword_meta["llm_scored_examples"] = llm_meta.get("scored_examples", [])
             keyword_meta["llm_scoring_candidates"] = llm_meta.get("scoring_candidates", len(candidates))
             keyword_meta["llm_scored_count"] = llm_meta.get("scored_count", 0)
             keyword_meta["llm_pass_count"] = llm_meta.get("pass_count", 0)
@@ -1988,9 +2041,27 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         lines.append(f"Scoring candidates: {stats.scoring_candidates}")
     if stats.scored_count > 0:
         lines.append(f"Scored papers: {stats.scored_count}")
-    if stats.score_buckets:
-        lines.append("Score distribution: " + format_score_buckets_text(stats.score_buckets))
+    lines.append("Score distribution: " + format_score_buckets_text(stats.score_buckets))
+    if stats.scored_examples:
+        lines.append("Scored papers (score | title): " + " || ".join(stats.scored_examples[:40]))
     lines.append(f"Passed threshold: {stats.pass_count}")
+    if stats.project_cadence_filtered_out > 0:
+        lines.append(
+            "Project cadence filter removed: "
+            f"{stats.project_cadence_filtered_out}"
+        )
+    if stats.project_cadence_summary:
+        lines.extend(stats.project_cadence_summary)
+    if stats.llm_fallback_score_buckets:
+        lines.append(
+            "LLM pre-fallback score distribution: "
+            + format_score_buckets_text(stats.llm_fallback_score_buckets)
+        )
+    if stats.llm_fallback_scored_examples:
+        lines.append(
+            "LLM pre-fallback papers (score | title): "
+            + " || ".join(stats.llm_fallback_scored_examples[:40])
+        )
     if stats.llm_fallback_reason:
         lines.append(f"LLM fallback info: {stats.llm_fallback_reason}")
     if stats.zero_candidate_recovery_steps:
@@ -2635,27 +2706,20 @@ def collect_and_rank_papers(
     score_buckets = rank_meta.get("score_buckets", {})
     if isinstance(score_buckets, dict):
         stats.score_buckets = {str(k): int(v) for k, v in score_buckets.items()}
+    scored_examples = rank_meta.get("scored_examples", [])
+    if isinstance(scored_examples, list):
+        stats.scored_examples = [clean_text(str(item)) for item in scored_examples if clean_text(str(item))]
     stats.llm_fallback_reason = clean_text(str(rank_meta.get("llm_fallback_reason", "")))
-    if (
-        stats.ranking_mode == "llm"
-        and "llm_score_buckets" in rank_meta
-        and isinstance(rank_meta.get("llm_score_buckets"), dict)
-    ):
-        stats.score_buckets = {
+    if "llm_score_buckets" in rank_meta and isinstance(rank_meta.get("llm_score_buckets"), dict):
+        stats.llm_fallback_score_buckets = {
             str(k): int(v)
             for k, v in rank_meta.get("llm_score_buckets", {}).items()
         }
-        if rank_meta.get("llm_threshold") is not None:
-            try:
-                stats.ranking_threshold = float(rank_meta.get("llm_threshold"))
-                stats.ranking_mode = "llm"
-                stats.scoring_candidates = int(
-                    rank_meta.get("llm_scoring_candidates", stats.scoring_candidates)
-                )
-                stats.scored_count = int(rank_meta.get("llm_scored_count", stats.scored_count))
-                stats.pass_count = int(rank_meta.get("llm_pass_count", stats.pass_count))
-            except (TypeError, ValueError):
-                pass
+        llm_examples = rank_meta.get("llm_scored_examples", [])
+        if isinstance(llm_examples, list):
+            stats.llm_fallback_scored_examples = [
+                clean_text(str(item)) for item in llm_examples if clean_text(str(item))
+            ]
     logging.info("Relevant papers selected: %d", len(ranked))
     emit_progress(progress_callback, "Paper ranking completed.", 90)
     return ranked, stats
@@ -2693,6 +2757,13 @@ def run_digest(
         now_utc,
         progress_callback=progress_callback,
     )
+    ranked_papers, cadence_summary, cadence_filtered_out = apply_project_cadence_filter(
+        ranked_papers,
+        config,
+        now_utc,
+    )
+    stats.project_cadence_summary = cadence_summary
+    stats.project_cadence_filtered_out = cadence_filtered_out
     papers_after_duplicate_filter, sent_history, duplicates_filtered = filter_already_sent_papers(
         ranked_papers,
         now_utc,
@@ -2978,6 +3049,89 @@ def evaluate_send_cadence(
     return False, next_due
 
 
+def evaluate_project_cadence(
+    project: ResearchProject,
+    now_utc: datetime,
+    timezone_obj: ZoneInfo,
+    anchor_date_value: str,
+) -> Tuple[bool, datetime.date]:
+    now_local_date = now_utc.astimezone(timezone_obj).date()
+    if project.send_interval_days <= 1:
+        return True, now_local_date
+    anchor_date = parse_anchor_date(anchor_date_value)
+    delta_days = (now_local_date - anchor_date).days
+    if delta_days < 0:
+        return False, anchor_date
+    remainder = delta_days % project.send_interval_days
+    if remainder == 0:
+        return True, now_local_date
+    next_due = now_local_date + timedelta(days=(project.send_interval_days - remainder))
+    return False, next_due
+
+
+def apply_project_cadence_filter(
+    papers: List[Paper],
+    config: AppConfig,
+    now_utc: datetime,
+) -> Tuple[List[Paper], List[str], int]:
+    if not papers or not config.research_projects:
+        return papers, [], 0
+
+    due_project_names: Dict[str, str] = {}
+    all_project_names: Dict[str, str] = {}
+    deferred_labels: List[str] = []
+    for project in config.research_projects:
+        is_due, next_due = evaluate_project_cadence(
+            project,
+            now_utc,
+            config.timezone,
+            config.send_anchor_date,
+        )
+        key = clean_text(project.name).lower()
+        if not key:
+            continue
+        all_project_names[key] = project.name
+        if is_due:
+            due_project_names[key] = project.name
+        else:
+            deferred_labels.append(f"{project.name}({project.send_frequency}->{next_due:%Y-%m-%d})")
+
+    if not due_project_names:
+        summary = ["No project cadence is due today."]
+        if deferred_labels:
+            summary.append("Deferred projects: " + ", ".join(deferred_labels))
+        return [], summary, len(papers)
+
+    filtered: List[Paper] = []
+    filtered_out = 0
+    unmatched_topic_labels = 0
+    for paper in papers:
+        topic_key = clean_text(paper.topic).lower()
+        if not topic_key:
+            filtered.append(paper)
+            continue
+        if topic_key not in all_project_names:
+            # Topic labels may be custom and not 1:1 with project names.
+            # Only apply cadence filtering when project mapping is explicit.
+            unmatched_topic_labels += 1
+            filtered.append(paper)
+            continue
+        if topic_key in due_project_names:
+            filtered.append(paper)
+            continue
+        filtered_out += 1
+
+    summary = [f"Due projects today: {', '.join(due_project_names.values())}"]
+    if deferred_labels:
+        summary.append("Deferred projects: " + ", ".join(deferred_labels))
+    if unmatched_topic_labels > 0:
+        summary.append(
+            "Cadence bypassed for papers without explicit project mapping: "
+            f"{unmatched_topic_labels}"
+        )
+    return filtered, summary, filtered_out
+
+
 def load_config(require_email_credentials: bool) -> AppConfig:
     # Reload .env on each call so web UI saves are applied immediately.
     env_path, _ = bootstrap_runtime_files()
@@ -3143,6 +3297,9 @@ def load_config(require_email_credentials: bool) -> AppConfig:
             for project in file_projects:
                 name = clean_text(str(project.get("name", "")))
                 context = clean_text(str(project.get("context", "")))
+                project_send_frequency, project_interval_days = normalize_send_frequency(
+                    str(project.get("send_frequency", "daily"))
+                )
                 keywords_raw = project.get("keywords", [])
                 if isinstance(keywords_raw, list):
                     keywords = [clean_text(str(item)) for item in keywords_raw if clean_text(str(item))]
@@ -3156,7 +3313,14 @@ def load_config(require_email_credentials: bool) -> AppConfig:
                     else (context or f"Keywords: {', '.join(keywords)}")
                 )
                 if name and merged_context:
-                    research_projects.append(ResearchProject(name=name, context=merged_context))
+                    research_projects.append(
+                        ResearchProject(
+                            name=name,
+                            context=merged_context,
+                            send_frequency=project_send_frequency,
+                            send_interval_days=project_interval_days,
+                        )
+                    )
 
     try:
         ZoneInfo(timezone_name)

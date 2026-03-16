@@ -1,6 +1,7 @@
 projects:
   - name: "My Primary Research Project"
     context: "Describe what you are actively building or validating this month."
+    send_frequency: "daily"
     keywords:
       - "medical imaging"
       - "foundation model"

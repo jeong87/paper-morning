@@ -2,6 +2,8 @@
 
 [![Paper Morning Logo](assets/papermorning2.png)](https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html)
 
+**[EN](README.md) | [KR](docs/manuals/README_KR.md)**
+
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
 It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
 
@@ -35,6 +37,7 @@ Notes:
 
 ## Key Features
 - Personalized LLM relevance ranking using your active projects.
+- Per-project mail cadence (`daily` / `every_3_days` / `weekly`) in Topic Editor.
 - Configurable cadence: `daily`, `every_3_days`, `weekly`.
 - Duplicate suppression with history tracking (`sent_ids.json`).
 - PubMed 429 retry/backoff handling.

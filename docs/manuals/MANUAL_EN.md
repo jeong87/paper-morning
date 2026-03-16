@@ -108,11 +108,13 @@ Language note:
   "projects": [
     {
       "name": "Medical image segmentation automation",
-      "context": "Automated lesion and organ segmentation from CT and MRI with robust generalization"
+      "context": "Automated lesion and organ segmentation from CT and MRI with robust generalization",
+      "send_frequency": "daily"
     },
     {
       "name": "Clinical NLP prognosis",
-      "context": "Early risk prediction from EHR notes and structured clinical variables"
+      "context": "Early risk prediction from EHR notes and structured clinical variables",
+      "send_frequency": "weekly"
     }
   ],
   "topics": [
@@ -131,6 +133,10 @@ Language note:
 Important:
 - Empty `topics` or missing source queries will block runs.
 - Query lifecycle is user-managed; daily runs use saved query state.
+- Each project can define its own cadence via `send_frequency`:
+  - `daily`
+  - `every_3_days`
+  - `weekly`
 
 ## 4) Bootstrap workflow (recommended for first setup)
 Workflow:

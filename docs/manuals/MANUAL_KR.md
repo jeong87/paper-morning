@@ -112,15 +112,18 @@ GOOGLE_SCHOLAR_API_KEY=
   "projects": [
     {
       "name": "의료영상 분할 자동화",
-      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization"
+      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization",
+      "send_frequency": "daily"
     },
     {
       "name": "임상 텍스트 기반 예후 예측",
-      "context": "Early risk prediction from EHR notes and structured clinical variables"
+      "context": "Early risk prediction from EHR notes and structured clinical variables",
+      "send_frequency": "every_3_days"
     },
     {
       "name": "다중모달 진단 보조 모델",
-      "context": "Joint modeling of image and clinical text for diagnosis support"
+      "context": "Joint modeling of image and clinical text for diagnosis support",
+      "send_frequency": "weekly"
     },
     {
       "name": "의학 논문 QA/RAG 시스템",
@@ -151,6 +154,10 @@ GOOGLE_SCHOLAR_API_KEY=
 주의:
 - `topics`가 비어 있으면 실행 시 "검색 쿼리 없음"으로 실패합니다.
 - 쿼리는 "프로젝트 변경 시에만" 갱신하고, 일일 실행에서는 저장된 쿼리를 그대로 사용합니다.
+- 프로젝트별 메일 주기는 `send_frequency`로 설정합니다.
+  - `daily`
+  - `every_3_days`
+  - `weekly`
 
 #### C) PM_PROJECTS_JSON 예시 (선택)
 초기 쿼리 생성 워크플로우에서 `PM_TOPICS_JSON` 대신 프로젝트 목록만 넣고 싶을 때 사용합니다.
@@ -160,11 +167,13 @@ GOOGLE_SCHOLAR_API_KEY=
   "projects": [
     {
       "name": "의료영상 분할 자동화",
-      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization"
+      "context": "Automated lesion/organ segmentation from CT and MRI with robust generalization",
+      "send_frequency": "daily"
     },
     {
       "name": "임상 텍스트 기반 예후 예측",
-      "context": "Early risk prediction from EHR notes and structured clinical variables"
+      "context": "Early risk prediction from EHR notes and structured clinical variables",
+      "send_frequency": "weekly"
     }
   ]
 }
