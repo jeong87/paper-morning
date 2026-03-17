@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -35,7 +36,11 @@ from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
     bootstrap_runtime_files,
     compute_internal_schedule_time,
+    delivery_mode_label,
+    delivery_requires_email,
     enforce_private_file_permissions,
+    get_latest_preview_path,
+    get_local_inbox_dir,
     get_default_data_dir,
     get_log_file_path,
     get_runtime_base_dir,
@@ -43,6 +48,7 @@ from paper_digest_app import (
     load_config,
     parse_json_loose,
     load_google_oauth_bundle_defaults,
+    normalize_delivery_mode,
     normalize_relevance_mode,
     resolve_secret_value,
     resolve_env_path,
@@ -95,9 +101,12 @@ GOOGLE_OAUTH_SCOPES = [
     "profile",
     "https://www.googleapis.com/auth/gmail.send",
 ]
-OAUTH_UI_ENABLED = False
+OAUTH_UI_ENABLED = True
+LOCAL_BASE_URL_ENV_KEY = "PAPER_MORNING_LOCAL_BASE_URL"
 
 EXPECTED_ENV_KEYS = [
+    "DELIVERY_MODE",
+    "AUTO_OPEN_DIGEST_WINDOW",
     "GMAIL_ADDRESS",
     "GMAIL_APP_PASSWORD",
     "RECIPIENT_EMAIL",
@@ -153,6 +162,8 @@ EXPECTED_ENV_KEYS = [
 ]
 
 DEFAULT_ENV_VALUES = {
+    "DELIVERY_MODE": "local_inbox",
+    "AUTO_OPEN_DIGEST_WINDOW": "true",
     "GMAIL_ADDRESS": "",
     "GMAIL_APP_PASSWORD": "",
     "RECIPIENT_EMAIL": "",
@@ -684,6 +695,9 @@ BASE_TEMPLATE = """
       <a href="{{ url_for('home') }}" class="{{ 'active' if active_page == 'home' else '' }}">
         <span class="nav-icon">🏠</span> Home
       </a>
+      <a href="{{ url_for('inbox_page') }}" class="{{ 'active' if active_page == 'inbox' else '' }}">
+        <span class="nav-icon">📥</span> Local Inbox
+      </a>
       <a href="{{ url_for('setup') }}" class="{{ 'active' if active_page == 'setup' else '' }}">
         <span class="nav-icon">🧭</span> Setup Wizard
       </a>
@@ -749,6 +763,31 @@ def now_iso() -> str:
 
 def env_truthy(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_effective_delivery_mode(env_map: Dict[str, str]) -> str:
+    return normalize_delivery_mode(str(env_map.get("DELIVERY_MODE", "local_inbox")))
+
+
+def auto_open_digest_window_enabled(env_map: Dict[str, str]) -> bool:
+    return env_truthy(str(env_map.get("AUTO_OPEN_DIGEST_WINDOW", "true")))
+
+
+def get_local_ui_base_url() -> str:
+    raw = os.getenv(LOCAL_BASE_URL_ENV_KEY, "").strip().rstrip("/")
+    return raw
+
+
+def maybe_open_preview_window() -> bool:
+    base_url = get_local_ui_base_url()
+    if not base_url:
+        return False
+    try:
+        webbrowser.open(f"{base_url}/preview/latest", new=2)
+        return True
+    except Exception as exc:
+        logging.warning("Failed to open preview window automatically: %s", safe_exception_text(exc))
+        return False
 
 
 def safe_exception_text(exc: Exception) -> str:
@@ -983,12 +1022,21 @@ def is_setup_completed(env_map: Dict[str, str] | None = None) -> bool:
         return True
     gmail_address = str(values.get("GMAIL_ADDRESS", "")).strip()
     recipient = str(values.get("RECIPIENT_EMAIL", "")).strip()
-    if not gmail_address or not recipient:
+    placeholder_emails = {"your_email@gmail.com", "example@gmail.com", "recipient@example.com"}
+    if (
+        not gmail_address
+        or not recipient
+        or gmail_address.lower() in placeholder_emails
+        or recipient.lower() in placeholder_emails
+    ):
         return False
     if has_google_oauth_gmail_ready(values):
         return True
     app_password = resolve_secret_value("GMAIL_APP_PASSWORD", str(values.get("GMAIL_APP_PASSWORD", "")))
-    return bool(str(app_password).strip())
+    normalized_password = str(app_password).strip()
+    if normalized_password in {"your_16_char_app_password", "xxxx xxxx xxxx xxxx"}:
+        return False
+    return bool(normalized_password)
 
 
 def should_force_setup(path: str, env_map: Dict[str, str] | None = None) -> bool:
@@ -1233,16 +1281,61 @@ def ensure_bootstrap_files() -> None:
 
 
 def scheduled_digest_job() -> None:
+    global last_dry_run_output, last_send_result
     try:
-        config = load_config(require_email_credentials=True)
-        run_digest(config, dry_run=False)
-    except Exception:
+        env_map = read_env_map()
+        delivery_mode = get_effective_delivery_mode(env_map)
+        update_job_state(
+            running=True,
+            kind="dry_run" if delivery_mode == "local_inbox" else "send_now",
+            status=f"Scheduled {delivery_mode_label(delivery_mode)} job started...",
+            progress=5,
+            error="",
+            started_at=now_iso(),
+            finished_at="",
+        )
+        require_email = delivery_requires_email(delivery_mode)
+        config = load_config(require_email_credentials=require_email)
+        output = run_digest(
+            config,
+            dry_run=not require_email,
+            respect_schedule_policy=True,
+            print_dry_run_output=False,
+            progress_callback=lambda message, percent: update_job_state(status=message, progress=percent),
+        )
+        skipped = isinstance(output, str) and output.startswith("Skipping")
+        if skipped:
+            update_job_state(status=output, progress=100)
+        elif not require_email and auto_open_digest_window_enabled(env_map):
+            opened = maybe_open_preview_window()
+            status = "Local inbox preview opened." if opened else "Local inbox preview generated."
+            update_job_state(status=status, progress=100)
+        else:
+            update_job_state(
+                status=f"Scheduled {delivery_mode_label(delivery_mode)} digest completed.",
+                progress=100,
+            )
+        if require_email:
+            last_send_result = output
+        else:
+            last_dry_run_output = output
+    except Exception as exc:
         logging.exception("Scheduled digest job failed.")
+        update_job_state(
+            running=False,
+            error=safe_exception_text(exc),
+            status="Scheduled task failed.",
+            finished_at=now_iso(),
+        )
+    else:
+        update_job_state(running=False, finished_at=now_iso())
 
 
 def refresh_scheduler() -> str:
     with scheduler_lock:
-        config = load_config(require_email_credentials=True)
+        env_map = read_env_map()
+        delivery_mode = get_effective_delivery_mode(env_map)
+        config = load_config(require_email_credentials=False)
         internal_hour, internal_minute = compute_internal_schedule_time(
             config.send_hour,
             config.send_minute,
@@ -1263,7 +1356,8 @@ def refresh_scheduler() -> str:
         return (
             f"Scheduler active: user {config.send_hour:02d}:{config.send_minute:02d} "
             f"-> internal {internal_hour:02d}:{internal_minute:02d} "
-            f"({config.timezone_name}), SEND_FREQUENCY={config.send_frequency}"
+            f"({config.timezone_name}), SEND_FREQUENCY={config.send_frequency}, "
+            f"DELIVERY={delivery_mode_label(delivery_mode)}"
         )
 
 
@@ -1425,6 +1519,7 @@ def test_google_scholar_key(google_scholar_api_key: str) -> Tuple[bool, str]:
 
 def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
     warnings: List[str] = []
+    delivery_mode = get_effective_delivery_mode(env_map)
     if env_truthy(str(env_map.get("ALLOW_INSECURE_REMOTE_WEB", "false"))):
         warnings.append(
             "ALLOW_INSECURE_REMOTE_WEB=true: remote exposure without TLS can leak keys/passwords."
@@ -1437,7 +1532,7 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
         warnings.append(
             "USE_KEYRING=true but keyring backend is unavailable. Falling back to plaintext .env storage."
         )
-    if env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false"))):
+    if delivery_mode == "gmail_oauth" or env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false"))):
         oauth_values = get_effective_google_oauth_values(env_map)
         if not str(oauth_values.get("client_id", "")).strip():
             warnings.append(
@@ -1452,6 +1547,11 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
             str(env_map.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")),
         ):
             warnings.append("Google OAuth is not connected yet.")
+    if delivery_mode == "gmail_app_password":
+        if not str(env_map.get("GMAIL_ADDRESS", "") or "").strip():
+            warnings.append("Delivery mode is Gmail app password, but GMAIL_ADDRESS is empty.")
+        if not resolve_secret_value("GMAIL_APP_PASSWORD", str(env_map.get("GMAIL_APP_PASSWORD", ""))):
+            warnings.append("Delivery mode is Gmail app password, but GMAIL_APP_PASSWORD is empty.")
 
     try:
         max_queries = int(str(env_map.get("MAX_SEARCH_QUERIES_PER_SOURCE", "4")).strip())
@@ -1747,11 +1847,57 @@ def read_log_tail(path: Path, max_lines: int = 400, max_chars: int = 200_000) ->
 
 
 def read_latest_preview_payload() -> Dict[str, Any]:
-    preview_path = (get_default_data_dir() / "digest_preview.json").resolve()
+    preview_path = get_latest_preview_path()
     if not preview_path.exists():
         return {}
     try:
         payload = json.loads(preview_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def read_local_inbox_entries(limit: int = 20) -> List[Dict[str, Any]]:
+    inbox_dir = get_local_inbox_dir()
+    if not inbox_dir.exists():
+        return []
+    entries: List[Dict[str, Any]] = []
+    for path in sorted(inbox_dir.glob("*.json"), reverse=True)[: max(1, limit)]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        entry_id = path.stem
+        generated_at = str(payload.get("generated_at_utc", "") or "").strip()
+        entries.append(
+            {
+                "id": entry_id,
+                "subject": str(payload.get("subject", "") or "Paper Morning Digest").strip(),
+                "generated_at_utc": generated_at,
+                "paper_count": int(payload.get("paper_count", 0) or 0),
+                "delivery_mode": delivery_mode_label(str(payload.get("delivery_mode", "local_inbox"))),
+                "path": str(path),
+            }
+        )
+    return entries
+
+
+def read_local_inbox_payload(entry_id: str) -> Dict[str, Any]:
+    safe_id = "".join(ch for ch in str(entry_id or "").strip() if ch.isalnum() or ch in {"-", "_", "T", "Z"})
+    if not safe_id:
+        return {}
+    path = (get_local_inbox_dir() / f"{safe_id}.json").resolve()
+    inbox_root = get_local_inbox_dir().resolve()
+    try:
+        path.relative_to(inbox_root)
+    except Exception:
+        return {}
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
@@ -2092,10 +2238,19 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def build_home_body() -> str:
     env_map = read_env_map()
+    autorun_kind = str(request.args.get("autorun", "") or "").strip()
+    if autorun_kind not in {"dry_run"}:
+        autorun_kind = ""
+    delivery_mode = get_effective_delivery_mode(env_map)
+    delivery_mode_text = delivery_mode_label(delivery_mode)
+    uses_email_delivery = delivery_requires_email(delivery_mode)
+    auto_open_text = "Enabled" if auto_open_digest_window_enabled(env_map) else "Disabled"
     oauth_values = get_effective_google_oauth_values(env_map)
     escaped_status = html.escape(scheduler_status_text())
     escaped_output = html.escape(last_dry_run_output) if last_dry_run_output else "No preview generated yet."
     preview_payload = read_latest_preview_payload()
+    inbox_entries = read_local_inbox_entries(limit=5)
+    inbox_rows_html = ""
     preview_rows_html = ""
     preview_papers = preview_payload.get("papers", []) if isinstance(preview_payload, dict) else []
     has_preview_html = bool(
@@ -2125,6 +2280,22 @@ def build_home_body() -> str:
         preview_rows_html = "".join(rows)
     else:
         preview_rows_html = "<div class='small'>Run <b>Preview Now</b> to generate your first personalized digest.</div>"
+    if inbox_entries:
+        inbox_rows_html = "".join(
+            (
+                "<div style='padding:10px 0; border-bottom:1px solid var(--card-border);'>"
+                f"<div style='font-weight:600;'><a href=\"{html.escape(url_for('inbox_entry', entry_id=str(entry.get('id', ''))), quote=True)}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+                f"{html.escape(str(entry.get('subject', '') or 'Paper Morning Digest'))}</a></div>"
+                f"<div class='small' style='margin-top:4px;'>"
+                f"{html.escape(str(entry.get('generated_at_utc', '') or ''))} · "
+                f"{html.escape(str(entry.get('delivery_mode', '') or 'Local Inbox'))} · "
+                f"{html.escape(str(entry.get('paper_count', 0)))} papers"
+                "</div></div>"
+            )
+            for entry in inbox_entries
+        )
+    else:
+        inbox_rows_html = "<div class='small'>No digest saved yet. Generate your first preview to populate Local Inbox.</div>"
     oauth_connected_email = str(env_map.get("GOOGLE_OAUTH_CONNECTED_EMAIL", "") or "").strip()
     oauth_enabled = env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false")))
     oauth_use_for_gmail = env_truthy(str(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")))
@@ -2171,14 +2342,15 @@ def build_home_body() -> str:
     body = """
     <div class="page-header">
       <h1>Dashboard</h1>
-      <p>Preview-first workflow: generate a personalized digest preview first, then enable automation.</p>
+      <p>Local-inbox workflow: generate a personalized digest on this computer first, then optionally enable email delivery.</p>
     </div>
 
     <div class="card">
-      <p class="card-title">Mode</p>
+      <p class="card-title">Delivery</p>
       <div class="small">
-        <strong>Preview mode</strong> (recommended): no email required, generate digest preview now.<br/>
-        <strong>Daily automation mode</strong>: enable scheduled delivery after preview quality is confirmed.
+        <strong>Current mode</strong>: <b>__DELIVERY_MODE__</b><br/>
+        <strong>Morning popup</strong>: <b>__AUTO_OPEN_STATUS__</b><br/>
+        <strong>Local inbox</strong> saves each generated digest to this computer and opens it in your browser instead of sending an email.
       </div>
     </div>
 
@@ -2186,7 +2358,7 @@ def build_home_body() -> str:
       <span id="sched-icon" style="font-size:18px;">📅</span>
       <div>
         <span id="sched-text" style="font-size:13.5px; font-weight:500;">__SCHEDULER_STATUS__</span>
-        <div class="small" style="margin-top:4px;">Send frequency: <b>__SEND_FREQUENCY__</b></div>
+        <div class="small" style="margin-top:4px;">Schedule: <b>__SEND_FREQUENCY__</b></div>
       </div>
     </div>
 
@@ -2217,26 +2389,32 @@ def build_home_body() -> str:
     <div class="action-grid">
       <div class="action-card">
         <span class="action-icon">🔍</span>
-        <span class="action-label">Preview Digest</span>
-        <span class="action-desc">Runs collection/ranking and shows digest output without sending email.</span>
-        <button id="btn-dry" class="btn-success" onclick="startJob('dry_run')">Preview Now</button>
+        <span class="action-label">Generate Digest</span>
+        <span class="action-desc">Run collection and ranking now, then open the generated digest in a browser tab.</span>
+        <button id="btn-dry" class="btn-success" onclick="startJob('dry_run')">Generate Now</button>
       </div>
       <div class="action-card">
         <span class="action-icon">🧾</span>
-        <span class="action-label">Open Email Preview</span>
-        <span class="action-desc">Open the latest digest preview in a new browser tab.</span>
-        <button id="btn-open-preview" class="btn-ghost" onclick="openPreviewTab()" __PREVIEW_BTN_DISABLED__>Open Preview Tab</button>
+        <span class="action-label">Open Latest Digest</span>
+        <span class="action-desc">Open the latest saved digest from your local inbox.</span>
+        <button id="btn-open-preview" class="btn-ghost" onclick="openPreviewTab()" __PREVIEW_BTN_DISABLED__>Open Latest</button>
+      </div>
+      <div class="action-card">
+        <span class="action-icon">📥</span>
+        <span class="action-label">Open Local Inbox</span>
+        <span class="action-desc">Browse recently saved digests stored on this computer.</span>
+        <button id="btn-open-inbox" class="btn-ghost" onclick="window.location.href='__INBOX_URL__'">Open Inbox</button>
       </div>
     </div>
 
     <details class="card" style="margin-top:14px;">
-      <summary style="cursor:pointer; font-weight:600;">Advanced automation controls (email/send scheduler)</summary>
+      <summary style="cursor:pointer; font-weight:600;">Advanced automation and email delivery</summary>
       <div class="action-grid" style="margin-top:12px;">
         <div class="action-card">
           <span class="action-icon">📨</span>
           <span class="action-label">Send Now</span>
-          <span class="action-desc">Send one real digest email immediately.</span>
-          <button id="btn-send" onclick="startJob('send_now')">Send</button>
+          <span class="action-desc">Send one real digest email immediately. Switch delivery mode in Setup/Settings first if you are using local inbox.</span>
+          <button id="btn-send" onclick="startJob('send_now')" __SEND_BTN_DISABLED__>Send</button>
         </div>
         <div class="action-card">
           <span class="action-icon">🔄</span>
@@ -2278,6 +2456,14 @@ def build_home_body() -> str:
 
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <p class="card-title" style="margin:0; border:none; padding:0;">Local Inbox</p>
+        <a class="btn-ghost" href="__INBOX_URL__">Open Full Inbox</a>
+      </div>
+      <div>__INBOX_ROWS__</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <p class="card-title" style="margin:0; border:none; padding:0;">Latest Preview Output</p>
         <button class="btn-ghost" onclick="toggleOutput()" id="btn-toggle" style="padding:4px 10px; font-size:12px;">Collapse ▲</button>
       </div>
@@ -2315,10 +2501,14 @@ def build_home_body() -> str:
       }
 
       function setButtonsDisabled(disabled) {
-        ['btn-dry', 'btn-send', 'btn-reload', 'btn-task', 'btn-open-preview'].forEach(id => {
+        ['btn-dry', 'btn-send', 'btn-reload', 'btn-task', 'btn-open-preview', 'btn-open-inbox'].forEach(id => {
           const el = document.getElementById(id);
           if (el) {
-            el.disabled = disabled;
+            if (id === 'btn-send' && __SEND_BUTTON_LOCKED__) {
+              el.disabled = true;
+            } else {
+              el.disabled = disabled;
+            }
           }
         });
       }
@@ -2400,14 +2590,21 @@ def build_home_body() -> str:
 
       fetchStatus();
       setInterval(fetchStatus, 1200);
+      const autorunKind = '__AUTO_RUN_KIND__';
+      if (autorunKind) {
+        setTimeout(() => startJob(autorunKind), 250);
+      }
     </script>
     """
 
     return (
         body.replace("__SCHEDULER_STATUS__", escaped_status)
+        .replace("__DELIVERY_MODE__", html.escape(delivery_mode_text))
+        .replace("__AUTO_OPEN_STATUS__", html.escape(auto_open_text))
         .replace("__SEND_FREQUENCY__", html.escape(send_frequency_label))
         .replace("__LAST_DRY_OUTPUT__", escaped_output)
         .replace("__PREVIEW_CARDS__", preview_rows_html)
+        .replace("__INBOX_ROWS__", inbox_rows_html)
         .replace("__OAUTH_BADGE__", oauth_badge_html)
         .replace("__OAUTH_EMAIL__", html.escape(oauth_connected_email or "Not connected"))
         .replace("__OAUTH_SOURCE__", html.escape(oauth_source))
@@ -2419,7 +2616,11 @@ def build_home_body() -> str:
         .replace("__OAUTH_DISCONNECT_URL__", url_for("google_oauth_disconnect"))
         .replace("__API_STATUS__", url_for("jobs_status"))
         .replace("__PREVIEW_URL__", url_for("preview_latest"))
+        .replace("__INBOX_URL__", url_for("inbox_page"))
         .replace("__PREVIEW_BTN_DISABLED__", "" if has_preview_html else "disabled")
+        .replace("__SEND_BTN_DISABLED__", "" if uses_email_delivery else "disabled")
+        .replace("__SEND_BUTTON_LOCKED__", "true" if not uses_email_delivery else "false")
+        .replace("__AUTO_RUN_KIND__", autorun_kind)
         .replace("__API_START_BASE__", "/jobs/start")
     )
 
@@ -2598,12 +2799,14 @@ def setup():
 
     if request.method == "POST":
         updated = dict(env_map)
-        selected_mode = str(request.form.get("ONBOARDING_MODE", "preview") or "preview").strip().lower()
-        if selected_mode not in {"preview", "daily"}:
-            selected_mode = "preview"
+        delivery_mode = normalize_delivery_mode(request.form.get("DELIVERY_MODE", "local_inbox"))
+        selected_mode = "preview" if delivery_mode == "local_inbox" else "daily"
         updated["ONBOARDING_MODE"] = selected_mode
+        updated["DELIVERY_MODE"] = delivery_mode
         basic_keys = [
             "ONBOARDING_MODE",
+            "DELIVERY_MODE",
+            "AUTO_OPEN_DIGEST_WINDOW",
             "GMAIL_ADDRESS",
             "RECIPIENT_EMAIL",
             "TIMEZONE",
@@ -2639,6 +2842,7 @@ def setup():
             if (not OAUTH_UI_ENABLED) and key in OAUTH_FORM_KEYS:
                 continue
             if key in {
+                "AUTO_OPEN_DIGEST_WINDOW",
                 "ENABLE_LLM_AGENT",
                 "ENABLE_GEMINI_ADVANCED_REASONING",
                 "ENABLE_CEREBRAS_FALLBACK",
@@ -2652,6 +2856,9 @@ def setup():
                 updated[key] = "true" if request.form.get(key) == "on" else "false"
             else:
                 updated[key] = request.form.get(key, "").strip()
+        if delivery_mode == "gmail_oauth":
+            updated["ENABLE_GOOGLE_OAUTH"] = "true"
+            updated["GOOGLE_OAUTH_USE_FOR_GMAIL"] = "true"
 
         for secret_key in {
             "GMAIL_APP_PASSWORD",
@@ -2711,11 +2918,8 @@ def setup():
                 except Exception as exc:
                     logging.warning("Setup saved but scheduler reload skipped: %s", safe_exception_text(exc))
                 if request.form.get("after_save") == "preview":
-                    started, message = start_background_job("dry_run")
-                    if started:
-                        flash("Setup saved. Generating preview now.", "ok")
-                    else:
-                        flash(f"Setup saved, but preview did not start: {message}", "danger")
+                    flash("Setup saved. Generating preview now.", "ok")
+                    return redirect(url_for("home", autorun="dry_run"))
                 else:
                     flash("Setup saved successfully.", "ok")
                 return redirect(url_for("home"))
@@ -2736,6 +2940,7 @@ def setup():
     checked_google_oauth_gmail = (
         "checked" if env_truthy(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")) else ""
     )
+    checked_auto_open_digest = "checked" if auto_open_digest_window_enabled(env_map) else ""
     oauth_defaults = get_effective_google_oauth_values(env_map)
     oauth_bundle_ready_text = "Available" if oauth_defaults.get("bundle_ready") else "Not available"
     oauth_source_text = "Settings values"
@@ -2750,6 +2955,7 @@ def setup():
     selected_mode = str(env_map.get("ONBOARDING_MODE", "preview") or "preview").strip().lower()
     if selected_mode not in {"preview", "daily"}:
         selected_mode = "preview"
+    delivery_mode = get_effective_delivery_mode(env_map)
     projects_config_path = get_projects_config_path(env_map)
     projects_from_file, _ = read_projects_config(projects_config_path)
     primary_project = projects_from_file[0] if projects_from_file else {}
@@ -2783,13 +2989,20 @@ def setup():
       <input type="hidden" name="PROJECTS_CONFIG_FILE" value="{html.escape(str(projects_config_path), quote=True)}" />
 
       <div class="card">
-        <p class="card-title">1) Mode</p>
-        <div class="settings-row">
-          <div class="settings-label"><strong>Onboarding mode</strong><small>Preview-first is recommended.</small></div>
-          <select name="ONBOARDING_MODE" id="onboarding_mode" style="width:220px;">
-            <option value="preview" {"selected" if selected_mode == "preview" else ""}>Preview mode (recommended)</option>
-            <option value="daily" {"selected" if selected_mode == "daily" else ""}>Daily automation mode</option>
-          </select>
+        <p class="card-title">1) Delivery</p>
+        <div class="settings-grid">
+          <div class="settings-row">
+            <div class="settings-label"><strong>How should you receive digests?</strong><small>Local inbox is the easiest way to start.</small></div>
+            <select name="DELIVERY_MODE" id="delivery_mode" style="width:240px;">
+              <option value="local_inbox" {"selected" if delivery_mode == "local_inbox" else ""}>Local inbox (recommended)</option>
+              <option value="gmail_oauth" {"selected" if delivery_mode == "gmail_oauth" else ""}>Gmail via Google sign-in</option>
+              <option value="gmail_app_password" {"selected" if delivery_mode == "gmail_app_password" else ""}>Gmail via app password</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Open digest window automatically</strong><small>At the scheduled time, generate the digest and open it in your browser if this app is running.</small></div>
+            <input type="checkbox" name="AUTO_OPEN_DIGEST_WINDOW" {checked_auto_open_digest} />
+          </div>
         </div>
       </div>
 
@@ -2820,9 +3033,9 @@ def setup():
         </div>
       </div>
 
-      <details class="card" {"open" if selected_mode == "daily" else ""}>
-        <summary style="cursor:pointer; font-weight:600;">3) Automation + email transport (advanced)</summary>
-        <p class="small" style="margin:10px 0 12px;">For Gmail authentication, complete either <strong>App Password</strong> or <strong>Google OAuth</strong>.</p>
+      <details class="card" {"open" if delivery_mode != "local_inbox" else ""}>
+        <summary style="cursor:pointer; font-weight:600;">3) Schedule + Gmail delivery (optional)</summary>
+        <p class="small" style="margin:10px 0 12px;">Skip this section if you are using Local inbox. For Gmail delivery, complete either <strong>Google OAuth</strong> or <strong>App Password</strong>.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label"><strong>Gmail address</strong></div>
@@ -2841,7 +3054,7 @@ def setup():
             <input type="text" name="TIMEZONE" value="{esc('TIMEZONE')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Send time</strong></div>
+            <div class="settings-label"><strong>Digest time</strong><small>When to generate/open the morning digest</small></div>
             <div>
               <input type="time" id="setup_send_time" value="{send_hour_padded}:{send_minute_padded}" onchange="splitSetupTime(this.value)" style="width:140px;" />
               <input type="hidden" name="SEND_HOUR" id="setup_send_hour" value="{esc('SEND_HOUR')}" />
@@ -2875,7 +3088,7 @@ def setup():
         <p class="card-title">4) LLM/API (optional)</p>
         <p class="small" style="margin:0 0 12px;">Works in keyword-only fallback mode even without API keys.</p>
         <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Bundled Google OAuth client: <strong>{oauth_bundle_ready_text}</strong> (current source: {html.escape(oauth_source_text)})</p>
-        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>OAuth is currently hidden in the default app-password-first path.</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Google sign-in is available as an optional Gmail delivery method. Google account restrictions may still apply.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label"><strong>Enable LLM agent</strong></div>
@@ -3027,10 +3240,14 @@ def setup():
 @app.route("/setup/healthcheck", methods=["POST"])
 def setup_healthcheck():
     env_map = read_env_map()
-    gmail_ok, gmail_msg = test_gmail_login(
-        str(env_map.get("GMAIL_ADDRESS", "")).strip(),
-        resolve_secret_value("GMAIL_APP_PASSWORD", str(env_map.get("GMAIL_APP_PASSWORD", "")).strip()),
-    )
+    delivery_mode = get_effective_delivery_mode(env_map)
+    if delivery_mode == "gmail_app_password":
+        gmail_ok, gmail_msg = test_gmail_login(
+            str(env_map.get("GMAIL_ADDRESS", "")).strip(),
+            resolve_secret_value("GMAIL_APP_PASSWORD", str(env_map.get("GMAIL_APP_PASSWORD", "")).strip()),
+        )
+    else:
+        gmail_ok, gmail_msg = True, "Skipped: current delivery mode does not use Gmail app password."
     gemini_ok, gemini_msg = test_gemini_key(
         resolve_secret_value("GEMINI_API_KEY", str(env_map.get("GEMINI_API_KEY", "")).strip()),
         get_effective_gemini_model(env_map),
@@ -3053,9 +3270,13 @@ def setup_healthcheck():
             str(env_map.get("GOOGLE_SCHOLAR_API_KEY", "")).strip(),
         )
     )
-    google_oauth_ok, google_oauth_msg = test_google_oauth_gmail(env_map)
+    if delivery_mode == "gmail_oauth":
+        google_oauth_ok, google_oauth_msg = test_google_oauth_gmail(env_map)
+    else:
+        google_oauth_ok, google_oauth_msg = True, "Skipped: current delivery mode does not use Gmail OAuth."
     return jsonify(
         {
+            "delivery_mode": delivery_mode_label(delivery_mode),
             "gmail": {"ok": gmail_ok, "message": gmail_msg},
             "google_oauth_gmail": {"ok": google_oauth_ok, "message": google_oauth_msg},
             "gemini": {"ok": gemini_ok, "message": gemini_msg},
@@ -3069,6 +3290,58 @@ def setup_healthcheck():
 @app.route("/")
 def home():
     return render_page(APP_TITLE, build_home_body(), active_page="home")
+
+
+@app.route("/inbox", methods=["GET"])
+def inbox_page():
+    entries = read_local_inbox_entries(limit=50)
+    if entries:
+        rows = "".join(
+            (
+                "<tr>"
+                f"<td><a href=\"{html.escape(url_for('inbox_entry', entry_id=str(entry.get('id', ''))), quote=True)}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+                f"{html.escape(str(entry.get('subject', '') or 'Paper Morning Digest'))}</a></td>"
+                f"<td>{html.escape(str(entry.get('generated_at_utc', '') or ''))}</td>"
+                f"<td>{html.escape(str(entry.get('delivery_mode', '') or 'Local Inbox'))}</td>"
+                f"<td>{html.escape(str(entry.get('paper_count', 0) or 0))}</td>"
+                "</tr>"
+            )
+            for entry in entries
+        )
+    else:
+        rows = "<tr><td colspan='4' class='small'>No saved digests yet. Generate one from Home.</td></tr>"
+
+    body = f"""
+    <div class="page-header">
+      <h1>Local Inbox</h1>
+      <p>Saved digest previews stored on this computer: <code>{html.escape(str(get_local_inbox_dir()))}</code></p>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Digest</th>
+            <th>Generated UTC</th>
+            <th>Delivery Mode</th>
+            <th>Papers</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows}
+        </tbody>
+      </table>
+    </div>
+    """
+    return render_page("Local Inbox", body, active_page="inbox")
+
+
+@app.route("/inbox/<entry_id>", methods=["GET"])
+def inbox_entry(entry_id: str):
+    payload = read_local_inbox_payload(entry_id)
+    html_preview = str(payload.get("html_preview", "") or "").strip() if isinstance(payload, dict) else ""
+    if html_preview:
+        return Response(html_preview, mimetype="text/html; charset=utf-8")
+    return redirect(url_for("inbox_page"))
 
 
 @app.route("/preview/latest", methods=["GET"])
@@ -3102,6 +3375,15 @@ def jobs_start(kind: str):
     allowed = {"dry_run", "send_now", "reload_scheduler", "register_windows_task"}
     if kind not in allowed:
         return jsonify({"ok": False, "message": "Unknown job kind."}), 400
+    if kind == "send_now":
+        env_map = read_env_map()
+        if not delivery_requires_email(get_effective_delivery_mode(env_map)):
+            return jsonify(
+                {
+                    "ok": False,
+                    "message": "Current delivery mode is Local Inbox. Switch to Gmail OAuth or Gmail app password first.",
+                }
+            ), 409
 
     ok, message = start_background_job(kind)
     code = 200 if ok else 409
@@ -3124,6 +3406,7 @@ def settings():
             if (not OAUTH_UI_ENABLED) and key in OAUTH_FORM_KEYS:
                 continue
             if key in {
+                "AUTO_OPEN_DIGEST_WINDOW",
                 "ENABLE_LLM_AGENT",
                 "ENABLE_GEMINI_ADVANCED_REASONING",
                 "ENABLE_CEREBRAS_FALLBACK",
@@ -3147,6 +3430,11 @@ def settings():
                 updated[key] = (
                     request.form.get(key, "").strip() if key in request.form else env_map.get(key, "")
                 )
+        updated["DELIVERY_MODE"] = normalize_delivery_mode(updated.get("DELIVERY_MODE", "local_inbox"))
+        updated["ONBOARDING_MODE"] = "preview" if updated["DELIVERY_MODE"] == "local_inbox" else "daily"
+        if updated["DELIVERY_MODE"] == "gmail_oauth":
+            updated["ENABLE_GOOGLE_OAUTH"] = "true"
+            updated["GOOGLE_OAUTH_USE_FOR_GMAIL"] = "true"
 
         try:
             write_env_map(updated)
@@ -3173,6 +3461,8 @@ def settings():
     google_oauth_gmail_checked = (
         "checked" if env_truthy(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")) else ""
     )
+    auto_open_digest_checked = "checked" if auto_open_digest_window_enabled(env_map) else ""
+    delivery_mode = get_effective_delivery_mode(env_map)
     oauth_defaults = get_effective_google_oauth_values(env_map)
     oauth_bundle_ready_text = "Available" if oauth_defaults.get("bundle_ready") else "Not available"
     oauth_source_text = "Settings values"
@@ -3216,9 +3506,33 @@ def settings():
       <input type="hidden" name="app_token" value="{APP_AUTH_TOKEN}" />
 
       <div class="card">
-        <p class="card-title">📧 Email Settings</p>
+        <p class="card-title">🚚 Delivery Settings</p>
+        <div class="settings-grid">
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Delivery Mode</strong>
+              <small>Choose local inbox, Gmail via Google sign-in, or Gmail via app password.</small>
+            </div>
+            <select name="DELIVERY_MODE" style="width:240px;">
+              <option value="local_inbox" {"selected" if delivery_mode == "local_inbox" else ""}>Local inbox (recommended)</option>
+              <option value="gmail_oauth" {"selected" if delivery_mode == "gmail_oauth" else ""}>Gmail via Google sign-in</option>
+              <option value="gmail_app_password" {"selected" if delivery_mode == "gmail_app_password" else ""}>Gmail via app password</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Auto-open Digest Window</strong>
+              <small>A scheduled run will open the latest digest in your browser when the local UI is running.</small>
+            </div>
+            <input type="checkbox" name="AUTO_OPEN_DIGEST_WINDOW" {auto_open_digest_checked} />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">📧 Gmail Delivery Settings</p>
         <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Bundled Google OAuth client: <strong>{oauth_bundle_ready_text}</strong> (Current source: {html.escape(oauth_source_text)})</p>
-        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>OAuth is currently hidden in the default app-password-first path.</p>
+        <p class="small" style="margin:0 0 12px;" {oauth_section_style}>Google sign-in is optional. Local inbox works without any email credentials.</p>
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
@@ -3321,8 +3635,8 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Send Time</strong>
-              <small>Local send time for your daily digest</small>
+              <strong>Digest Time</strong>
+              <small>Local time for scheduled digest generation / popup</small>
             </div>
             <div>
               <input type="time" id="send_time_picker" value="{send_hour_padded}:{send_minute_padded}" onchange="splitTime(this.value)" style="width:140px;" />

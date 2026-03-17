@@ -5,7 +5,7 @@
 **[EN](README.md) | [KR](docs/manuals/README_KR.md)**
 
 Paper Morning is an automated paper briefing tool for medical/health AI researchers.
-It fetches recent papers, ranks relevance with LLM + project context, and sends a concise email digest.
+It fetches recent papers, ranks relevance with LLM + project context, and delivers a concise digest to a local inbox by default, with Gmail delivery as an optional advanced mode.
 
 - Latest version: **[v0.5.2](VERSION)**
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
@@ -35,11 +35,12 @@ Notes:
 1. Reads your project context and saved search queries.
 2. Collects papers from arXiv, PubMed, Semantic Scholar, and optional Google Scholar (SerpAPI).
 3. Scores each paper (1-10) with LLM relevance ranking.
-4. Sends only high-relevance papers with short summaries by email.
+4. Saves or sends only high-relevance papers with short summaries.
 
 ## Key Features
 - Personalized LLM relevance ranking using your active projects.
 - Per-project mail cadence (`daily` / `every_3_days` / `weekly`) in Topic Editor.
+- Local inbox mode with browser popup scheduling on a running PC.
 - Configurable cadence: `daily`, `every_3_days`, `weekly`.
 - Duplicate suppression with history tracking (`sent_ids.json`).
 - PubMed 429 retry/backoff handling.
@@ -62,16 +63,18 @@ Generate your first personalized digest preview before email/automation setup.
 pip install -r deps/requirements.txt
 ```
 
-2. Run web console:
+2. Run local launcher:
 
 ```bash
-python app/web_app.py --host 127.0.0.1 --port 5050
+python app/local_ui_launcher.py
 ```
 
-3. Open `http://127.0.0.1:5050/setup`.
+3. The browser opens automatically. On first run, Setup Wizard opens automatically.
 4. Fill project description + Gemini key, then click `Save and Preview Now`.
 
-This verifies product value first without Gmail or GitHub Actions setup.
+This verifies product value first without Gmail or GitHub Actions setup. After setup, the default path is:
+- Click one button to generate and open the latest digest in a browser tab
+- Or keep the local UI running and let the scheduled morning popup open automatically
 
 ## GitHub Actions Mode (Advanced Automation)
 Use this after preview quality is confirmed.
@@ -148,9 +151,10 @@ Fallback (advanced):
 - `Gemini model 404`: use a supported model (`gemini-3.1-pro` or `gemini-3.1-flash`).
 - No email received: check sender/recipient addresses, spam folder, and auth config.
 
-## Authentication Priority
-1. Gmail App Password (current default for public beta users)
-2. Google OAuth (intentionally hidden in default UI path until public rollout is ready)
+## Delivery Priority
+1. Local Inbox (default, no email credentials required)
+2. Gmail OAuth (optional advanced mode)
+3. Gmail App Password (optional fallback)
 
 Gmail app password docs:
 - https://myaccount.google.com/apppasswords

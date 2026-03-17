@@ -78,6 +78,9 @@ KEYRING_SERVICE_NAME = "paper-morning"
 GOOGLE_OAUTH_BUNDLE_FILENAME = "google_oauth_bundle.json"
 INTERNAL_SCHEDULE_ADVANCE_MINUTES = 13
 LLM_RELEVANCE_MODE_DEFAULT = "balanced"
+DELIVERY_MODE_LOCAL_INBOX = "local_inbox"
+DELIVERY_MODE_GMAIL_OAUTH = "gmail_oauth"
+DELIVERY_MODE_GMAIL_APP_PASSWORD = "gmail_app_password"
 LLM_RELEVANCE_MODE_POLICIES: Dict[str, Dict[str, Any]] = {
     "strict": {
         "label": "Strict",
@@ -142,6 +145,31 @@ def normalize_relevance_mode(raw: Any) -> str:
     return LLM_RELEVANCE_MODE_DEFAULT
 
 
+def normalize_delivery_mode(raw: Any) -> str:
+    value = clean_text(str(raw or "")).lower()
+    if value in {"gmail_oauth", "oauth", "google_oauth"}:
+        return DELIVERY_MODE_GMAIL_OAUTH
+    if value in {"gmail_app_password", "gmail", "smtp", "app_password"}:
+        return DELIVERY_MODE_GMAIL_APP_PASSWORD
+    return DELIVERY_MODE_LOCAL_INBOX
+
+
+def delivery_mode_label(mode: str) -> str:
+    normalized = normalize_delivery_mode(mode)
+    if normalized == DELIVERY_MODE_GMAIL_OAUTH:
+        return "Gmail OAuth"
+    if normalized == DELIVERY_MODE_GMAIL_APP_PASSWORD:
+        return "Gmail App Password"
+    return "Local Inbox"
+
+
+def delivery_requires_email(mode: str) -> bool:
+    return normalize_delivery_mode(mode) in {
+        DELIVERY_MODE_GMAIL_OAUTH,
+        DELIVERY_MODE_GMAIL_APP_PASSWORD,
+    }
+
+
 def get_relevance_mode_policy(mode: str) -> Dict[str, Any]:
     return LLM_RELEVANCE_MODE_POLICIES[normalize_relevance_mode(mode)]
 
@@ -199,6 +227,8 @@ class AppConfig:
     gmail_address: str
     gmail_app_password: str
     recipient_email: str
+    delivery_mode: str
+    auto_open_digest_window: bool
     enable_google_oauth: bool
     google_oauth_use_for_gmail: bool
     google_oauth_client_id: str
@@ -530,6 +560,40 @@ def get_default_data_dir() -> Path:
 
 def get_log_file_path() -> Path:
     return (get_default_data_dir() / "paper-morning.log").resolve()
+
+
+def get_latest_preview_path() -> Path:
+    return (get_default_data_dir() / "digest_preview.json").resolve()
+
+
+def get_local_inbox_dir() -> Path:
+    return (get_default_data_dir() / "local_inbox").resolve()
+
+
+def save_preview_payload(payload: Dict[str, Any]) -> Path:
+    preview_path = get_latest_preview_path()
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    enforce_private_file_permissions(preview_path)
+
+    inbox_dir = get_local_inbox_dir()
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+    generated_at = clean_text(str(payload.get("generated_at_utc", "")))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if generated_at:
+        parsed = parse_iso_datetime(generated_at)
+        if parsed is not None:
+            stamp = parsed.strftime("%Y%m%dT%H%M%S%fZ")
+    archive_path = inbox_dir / f"{stamp}.json"
+    archive_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    enforce_private_file_permissions(archive_path)
+    return preview_path
 
 
 def resolve_env_path() -> Path:
@@ -2651,20 +2715,12 @@ def send_email(config: AppConfig, subject: str, html_body: str, text_body: str) 
     msg.attach(MIMEText(text_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
     message_text = msg.as_string()
-    if can_use_google_oauth_for_gmail(config):
-        try:
-            send_email_via_google_oauth(config, message_text)
-            return
-        except Exception as exc:
-            logging.warning(
-                "Google OAuth Gmail send failed. Falling back to SMTP app password if available: %s",
-                mask_sensitive_text(str(exc)),
-            )
-            if not config.gmail_app_password:
-                raise RuntimeError(
-                    "Google OAuth Gmail sending failed and SMTP app password is not configured. "
-                    "Check OAuth connection status or set GMAIL_APP_PASSWORD."
-                ) from exc
+    delivery_mode = normalize_delivery_mode(config.delivery_mode)
+    if delivery_mode == DELIVERY_MODE_LOCAL_INBOX:
+        raise RuntimeError("Local inbox mode does not send email.")
+    if delivery_mode == DELIVERY_MODE_GMAIL_OAUTH:
+        send_email_via_google_oauth(config, message_text)
+        return
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(config.gmail_address, config.gmail_app_password)
         smtp.sendmail(config.gmail_address, [recipient], message_text)
@@ -2937,12 +2993,14 @@ def run_digest(
     dry_run: bool = False,
     force_send: bool = False,
     print_dry_run_output: bool = True,
+    respect_schedule_policy: bool = False,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> str:
+    preview_only_mode = dry_run or not delivery_requires_email(config.delivery_mode)
     emit_progress(progress_callback, "Starting digest job...", 5)
     now_utc = datetime.now(timezone.utc)
     local_send_date: date | None = None
-    if not dry_run and not force_send:
+    if respect_schedule_policy and not force_send:
         should_send_today, next_due_date = evaluate_send_cadence(config, now_utc)
         if not should_send_today:
             skipped_message = (
@@ -3001,6 +3059,7 @@ def run_digest(
         "subject": subject,
         "generated_at_utc": now_utc.isoformat(),
         "timezone": config.timezone_name,
+        "delivery_mode": config.delivery_mode,
         "send_frequency": config.send_frequency,
         "output_language": config.output_language,
         "paper_count": len(papers),
@@ -3029,15 +3088,15 @@ def run_digest(
         "html_preview": html_body,
     }
 
-    if dry_run:
-        logging.info("Dry run enabled. Skipping email sending.")
-        preview_path = get_default_data_dir() / "digest_preview.json"
-        preview_path.parent.mkdir(parents=True, exist_ok=True)
-        preview_path.write_text(
-            json.dumps(preview_payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        enforce_private_file_permissions(preview_path)
+    if preview_only_mode:
+        if dry_run:
+            logging.info("Dry run enabled. Skipping email sending.")
+        else:
+            logging.info(
+                "Delivery mode %s uses local inbox preview. Skipping email sending.",
+                config.delivery_mode,
+            )
+        preview_path = save_preview_payload(preview_payload)
         logging.info("Preview payload saved: %s", preview_path)
         if print_dry_run_output:
             output_encoding = sys.stdout.encoding or "utf-8"
@@ -3045,7 +3104,7 @@ def run_digest(
                 output_encoding, errors="replace"
             )
             print(safe_text)
-        emit_progress(progress_callback, "Dry-run completed.", 100)
+        emit_progress(progress_callback, "Preview saved to local inbox.", 100)
         return text_body
 
     emit_progress(progress_callback, "Sending email...", 98)
@@ -3371,6 +3430,13 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         resolve_secret_value("GMAIL_APP_PASSWORD", os.getenv("GMAIL_APP_PASSWORD", "")),
     )
     recipient_email = os.getenv("RECIPIENT_EMAIL", "").strip()
+    delivery_mode = normalize_delivery_mode(os.getenv("DELIVERY_MODE", DELIVERY_MODE_LOCAL_INBOX))
+    auto_open_digest_window = os.getenv("AUTO_OPEN_DIGEST_WINDOW", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     enable_google_oauth = os.getenv("ENABLE_GOOGLE_OAUTH", "false").strip().lower() in {
         "1",
         "true",
@@ -3553,7 +3619,7 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     except Exception as exc:
         raise ValueError(f"Invalid TIMEZONE value: {timezone_name}") from exc
 
-    if require_email_credentials:
+    if require_email_credentials and delivery_requires_email(delivery_mode):
         missing = []
         if not gmail_address:
             missing.append("GMAIL_ADDRESS")
@@ -3564,7 +3630,10 @@ def load_config(require_email_credentials: bool) -> AppConfig:
             and bool(google_oauth_client_secret)
             and bool(google_oauth_refresh_token)
         )
-        if not oauth_ready and not gmail_app_password:
+        if delivery_mode == DELIVERY_MODE_GMAIL_OAUTH:
+            if not oauth_ready:
+                missing.append("GOOGLE_OAUTH refresh setup")
+        elif not gmail_app_password:
             missing.append("GMAIL_APP_PASSWORD")
         if missing:
             raise ValueError("Missing required env vars for email: " + ", ".join(missing))
@@ -3573,6 +3642,8 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         gmail_address=gmail_address,
         gmail_app_password=gmail_app_password,
         recipient_email=recipient_email or gmail_address,
+        delivery_mode=delivery_mode,
+        auto_open_digest_window=auto_open_digest_window,
         enable_google_oauth=enable_google_oauth,
         google_oauth_use_for_gmail=google_oauth_use_for_gmail,
         google_oauth_client_id=google_oauth_client_id,
@@ -3644,7 +3715,7 @@ def start_scheduler(config: AppConfig, dry_run: bool) -> None:
         config.send_minute,
     )
     scheduler.add_job(
-        lambda: run_digest(config, dry_run=dry_run),
+        lambda: run_digest(config, dry_run=dry_run, respect_schedule_policy=True),
         "cron",
         hour=internal_hour,
         minute=internal_minute,

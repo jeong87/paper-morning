@@ -95,10 +95,13 @@ def main() -> int:
     except Exception as exc:
         logging.warning("Scheduler initialization skipped: %s", exc)
 
+    browser_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    os.environ[web_app.LOCAL_BASE_URL_ENV_KEY] = f"http://{browser_host}:{selected_port}"
+
     if not args.no_browser:
         threading.Thread(
             target=open_browser_when_ready,
-            args=(args.host, selected_port),
+            args=(browser_host, selected_port),
             daemon=True,
         ).start()
 

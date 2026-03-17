@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
     bootstrap_runtime_files,
+    normalize_delivery_mode,
     enforce_private_file_permissions,
     get_default_data_dir,
     normalize_relevance_mode,
@@ -210,6 +211,9 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
             )
 
     lines = [
+        f"DELIVERY_MODE={values_to_write['DELIVERY_MODE']}",
+        f"AUTO_OPEN_DIGEST_WINDOW={values_to_write['AUTO_OPEN_DIGEST_WINDOW']}",
+        "",
         f"GMAIL_ADDRESS={values_to_write['GMAIL_ADDRESS']}",
         f"GMAIL_APP_PASSWORD={values_to_write['GMAIL_APP_PASSWORD']}",
         f"RECIPIENT_EMAIL={values_to_write['RECIPIENT_EMAIL']}",
@@ -303,7 +307,8 @@ def main() -> int:
     timezone_name = prompt_text("Timezone (e.g. America/New_York, Europe/London, Asia/Seoul)", default="UTC")
     send_hour = prompt_int("Send hour (0-23)", 9, 0, 23)
     send_minute = prompt_int("Send minute (0-59)", 0, 0, 59)
-    configure_email_now = prompt_yes_no("Configure email delivery now?", default_yes=False)
+    auto_open_digest_window = prompt_yes_no("Open digest automatically at the scheduled time when the app is running?", default_yes=True)
+    configure_email_now = prompt_yes_no("Configure Gmail delivery now? (optional)", default_yes=False)
 
     gmail_address = ""
     recipient_email = ""
@@ -313,10 +318,17 @@ def main() -> int:
     google_oauth_client_id = ""
     google_oauth_client_secret = ""
     google_oauth_redirect_uri = ""
+    delivery_mode = "local_inbox"
     if configure_email_now:
+        raw_delivery_mode = prompt_text(
+            "Delivery mode (gmail_oauth / gmail_app_password)",
+            default="gmail_oauth",
+            required=True,
+        )
+        delivery_mode = normalize_delivery_mode(raw_delivery_mode)
         gmail_address = prompt_text("Gmail address", required=True)
         recipient_email = prompt_text("Recipient email", default=gmail_address, required=True)
-        enable_google_oauth = prompt_yes_no("Enable Google OAuth Gmail integration?", default_yes=False)
+        enable_google_oauth = delivery_mode == "gmail_oauth"
         if enable_google_oauth:
             google_oauth_client_id = prompt_text("Google OAuth Client ID", required=True)
             google_oauth_client_secret = prompt_text("Google OAuth Client Secret", required=True, secret=True)
@@ -351,6 +363,8 @@ def main() -> int:
         "GMAIL_ADDRESS": gmail_address,
         "GMAIL_APP_PASSWORD": gmail_app_password,
         "RECIPIENT_EMAIL": recipient_email,
+        "DELIVERY_MODE": delivery_mode,
+        "AUTO_OPEN_DIGEST_WINDOW": "true" if auto_open_digest_window else "false",
         "TIMEZONE": timezone_name,
         "SEND_HOUR": str(send_hour),
         "SEND_MINUTE": str(send_minute),
@@ -371,7 +385,7 @@ def main() -> int:
         "NCBI_API_KEY": ncbi_api_key,
         "PROJECTS_CONFIG_FILE": projects_config_file,
         "USER_TOPICS_FILE": topics_file,
-        "ONBOARDING_MODE": "preview",
+        "ONBOARDING_MODE": "preview" if delivery_mode == "local_inbox" else "daily",
         "WEB_PASSWORD": web_password,
         "ALLOW_INSECURE_REMOTE_WEB": "true" if allow_insecure_remote_web else "false",
         "USE_KEYRING": "true" if use_keyring else "false",
