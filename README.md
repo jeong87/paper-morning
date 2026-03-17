@@ -14,20 +14,22 @@ It fetches recent papers, ranks relevance with LLM + project context, and sends 
 ## Template sample
 <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html">Open Template sample</a>
 
-## Try Web Preview (No Download)
-If you want to test the digest style in browser first:
+## Try Live Web Preview (No Download)
+If you want to understand the product from GitHub first:
 
-- <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index.html">Open Web Preview</a>
+- <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index.html">Open Live Web Preview</a>
 
-What it does:
-- Enter project info + Gemini API key
-- Generates a digest-like preview
-- Opens email-style HTML in a new browser tab
+What happens on that page:
+- Enter your research context and Gemini API key
+- The page generates search queries from your context
+- It retrieves real recent candidates from arXiv and PubMed
+- It ranks and summarizes them with Gemini
+- It opens the email-style HTML preview in a new browser tab
 
 Notes:
 - Client-side only (runs in your browser)
 - No actual email is sent from this page
-- Use this as a quick quality check before local install
+- Best for first-impression validation before local install
 
 ## What It Does
 1. Reads your project context and saved search queries.

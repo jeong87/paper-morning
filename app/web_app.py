@@ -43,6 +43,7 @@ from paper_digest_app import (
     load_config,
     parse_json_loose,
     load_google_oauth_bundle_defaults,
+    normalize_relevance_mode,
     resolve_secret_value,
     resolve_env_path,
     run_digest,
@@ -201,7 +202,7 @@ DEFAULT_ENV_VALUES = {
     "CEREBRAS_MODEL": "gpt-oss-120b",
     "CEREBRAS_API_BASE": CEREBRAS_API_BASE_DEFAULT,
     "GEMINI_MAX_PAPERS": "5",
-    "LLM_RELEVANCE_THRESHOLD": "7",
+    "LLM_RELEVANCE_THRESHOLD": "6",
     "LLM_BATCH_SIZE": "5",
     "LLM_MAX_CANDIDATES": "30",
 }
@@ -1641,6 +1642,9 @@ def normalize_topics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             return "weekly"
         return "daily"
 
+    def normalize_topic_relevance_mode(raw: str) -> str:
+        return normalize_relevance_mode(raw)
+
     clean_projects: List[Dict[str, str]] = []
     for item in projects:
         if not isinstance(item, dict):
@@ -1667,12 +1671,14 @@ def normalize_topics_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
         google_scholar_query = str(item.get("google_scholar_query", "")).strip()
+        relevance_mode = normalize_topic_relevance_mode(str(item.get("relevance_mode", "balanced")))
         if not (name or keywords or arxiv_query or pubmed_query or semantic_query or google_scholar_query):
             continue
         clean_topics.append(
             {
                 "name": name,
                 "keywords": keywords,
+                "relevance_mode": relevance_mode,
                 "arxiv_query": arxiv_query,
                 "pubmed_query": pubmed_query,
                 "semantic_scholar_query": semantic_query,
@@ -2068,12 +2074,14 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         pubmed_query = str(item.get("pubmed_query", "")).strip()
         semantic_query = str(item.get("semantic_scholar_query", "")).strip()
         google_scholar_query = str(item.get("google_scholar_query", "")).strip()
+        relevance_mode = normalize_relevance_mode(str(item.get("relevance_mode", "balanced")))
         if not name:
             continue
         result.append(
             {
                 "name": name,
                 "keywords": keywords,
+                "relevance_mode": relevance_mode,
                 "arxiv_query": arxiv_query,
                 "pubmed_query": pubmed_query,
                 "semantic_scholar_query": semantic_query,
@@ -3620,6 +3628,7 @@ def topics():
 
     <div class="card">
       <h3>2) Topics / Queries</h3>
+      <p class="small" style="margin:0 0 10px;">Per-topic relevance mode changes both the LLM scoring prompt and the pass threshold used for that topic.</p>
       <div class="button-row" style="margin-bottom:10px;">
         <button type="button" id="btn-generate" class="btn-success" onclick="generateTopics()">Generate Keyword / Query</button>
         <span id="generate-status" class="small"></span>
@@ -3627,12 +3636,13 @@ def topics():
       <table>
         <thead>
           <tr>
-            <th style="width:12%;">Topic Name</th>
+            <th style="width:10%;">Topic Name</th>
+            <th style="width:10%;">Mode</th>
             <th style="width:16%;">Keywords (comma separated)</th>
-            <th style="width:18%;">arXiv Query</th>
-            <th style="width:18%;">PubMed Query</th>
-            <th style="width:18%;">Semantic Scholar Query</th>
-            <th style="width:18%;">Google Scholar Query</th>
+            <th style="width:15%;">arXiv Query</th>
+            <th style="width:15%;">PubMed Query</th>
+            <th style="width:15%;">Semantic Scholar Query</th>
+            <th style="width:15%;">Google Scholar Query</th>
             <th style="width:80px;">Action</th>
           </tr>
         </thead>
@@ -3711,9 +3721,17 @@ def topics():
         const tbody = document.getElementById('topics-body');
         tbody.innerHTML = '';
         topics.forEach((row, idx) => {
+          const mode = String(row.relevance_mode || 'balanced').trim().toLowerCase() || 'balanced';
           tbody.insertAdjacentHTML('beforeend', `
             <tr>
               <td><input type="text" value="${escHtml(row.name || '')}" oninput="topics[${idx}].name=this.value" /></td>
+              <td>
+                <select onchange="topics[${idx}].relevance_mode=this.value">
+                  <option value="strict" ${mode === 'strict' ? 'selected' : ''}>Strict</option>
+                  <option value="balanced" ${mode === 'balanced' ? 'selected' : ''}>Balanced</option>
+                  <option value="discovery" ${mode === 'discovery' ? 'selected' : ''}>Discovery</option>
+                </select>
+              </td>
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].keywords=this.value">${escHtml(topicKeywordsToText(row.keywords))}</textarea></td>
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].arxiv_query=this.value">${escHtml(row.arxiv_query || '')}</textarea></td>
               <td><textarea style="min-height:70px;" oninput="topics[${idx}].pubmed_query=this.value">${escHtml(row.pubmed_query || '')}</textarea></td>
@@ -3726,7 +3744,7 @@ def topics():
       }
 
       function addTopicRow() {
-        topics.push({ name: '', keywords: '', arxiv_query: '', pubmed_query: '', semantic_scholar_query: '', google_scholar_query: '' });
+        topics.push({ name: '', relevance_mode: 'balanced', keywords: '', arxiv_query: '', pubmed_query: '', semantic_scholar_query: '', google_scholar_query: '' });
         renderTopics();
       }
 
@@ -3755,6 +3773,7 @@ def topics():
               .filter(Boolean);
             return {
               name: (t.name || '').trim(),
+              relevance_mode: String(t.relevance_mode || 'balanced').trim().toLowerCase() || 'balanced',
               keywords,
               arxiv_query: (t.arxiv_query || '').trim(),
               pubmed_query: (t.pubmed_query || '').trim(),

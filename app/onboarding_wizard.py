@@ -9,6 +9,7 @@ from paper_digest_app import (
     bootstrap_runtime_files,
     enforce_private_file_permissions,
     get_default_data_dir,
+    normalize_relevance_mode,
     run_digest,
     load_config,
     store_secret_value,
@@ -103,6 +104,20 @@ def parse_keywords(raw: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def prompt_relevance_mode(default: str = "balanced") -> str:
+    while True:
+        value = prompt_text(
+            "Relevance mode (strict / balanced / discovery)",
+            default=default,
+            required=True,
+        )
+        lowered = value.strip().lower()
+        if lowered in {"strict", "balanced", "discovery"}:
+            normalized = normalize_relevance_mode(lowered)
+            return normalized
+        print("Please choose strict, balanced, or discovery.")
+
+
 def collect_topics() -> List[Dict[str, Any]]:
     topic_count = prompt_int(
         "How many topics do you want to prefill now? (0 allowed, can configure later in Topic Editor)",
@@ -124,6 +139,7 @@ def collect_topics() -> List[Dict[str, Any]]:
             keywords = parse_keywords(raw_keywords)
             if not keywords:
                 print("Please provide at least one keyword.")
+        relevance_mode = prompt_relevance_mode(default="balanced")
 
         arxiv_query = prompt_text(
             "arXiv query (optional now, but required before digest run)",
@@ -141,7 +157,7 @@ def collect_topics() -> List[Dict[str, Any]]:
             required=False,
         )
 
-        topic = {"name": name, "keywords": keywords}
+        topic = {"name": name, "keywords": keywords, "relevance_mode": relevance_mode}
         if arxiv_query:
             topic["arxiv_query"] = arxiv_query
         if pubmed_query:
@@ -379,7 +395,7 @@ def main() -> int:
         "CEREBRAS_MODEL": cerebras_model,
         "CEREBRAS_API_BASE": cerebras_api_base,
         "GEMINI_MAX_PAPERS": "5",
-        "LLM_RELEVANCE_THRESHOLD": "7",
+        "LLM_RELEVANCE_THRESHOLD": "6",
         "LLM_BATCH_SIZE": "5",
         "LLM_MAX_CANDIDATES": "30",
     }

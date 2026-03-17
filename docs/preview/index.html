@@ -3,51 +3,707 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Paper Morning Web Preview</title>
+  <title>Paper Morning Live Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --bg:#f5f6f8; --card:#fff; --line:#dfe3e8; --text:#1f2937; --sub:#6b7280; --brand:#245339; --brand-2:#2d6a47; --danger:#b42318; }
-    * { box-sizing:border-box; }
-    body { margin:0; background:radial-gradient(circle at 20% 0%, #eef6f1 0%, var(--bg) 40%, #edf2f8 100%); color:var(--text); font-family:"Segoe UI", Arial, sans-serif; line-height:1.45; }
-    .wrap { max-width:900px; margin:0 auto; padding:28px 16px 60px; }
-    h1 { margin:0 0 8px; font-size:30px; letter-spacing:-0.02em; }
-    .muted { color:var(--sub); font-size:14px; }
-    .grid { display:grid; grid-template-columns:1fr; gap:12px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
-    .label { display:block; font-size:12px; font-weight:600; color:#374151; margin:0 0 6px; text-transform:uppercase; letter-spacing:.04em; }
-    input,textarea,select { width:100%; border:1px solid #cfd6de; border-radius:8px; padding:10px 11px; font-size:14px; background:#fff; color:#111827; }
-    textarea { min-height:120px; resize:vertical; }
-    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
-    button,.link-btn { border:0; border-radius:8px; padding:10px 14px; font-weight:600; font-size:14px; cursor:pointer; text-decoration:none; display:inline-block; }
-    .btn-primary { background:linear-gradient(135deg, var(--brand), var(--brand-2)); color:#fff; }
-    .btn-ghost,.link-btn { border:1px solid #cfd6de; background:#fff; color:#1f2937; }
-    .status { margin-top:8px; font-size:13px; color:var(--sub); white-space:pre-wrap; }
-    .danger { color:var(--danger); }
-    @media (max-width:720px) { .row { grid-template-columns:1fr; } h1 { font-size:26px; } }
+    :root {
+      --paper: #f6f0e6;
+      --ink: #1b2430;
+      --sub: #5a6473;
+      --line: rgba(35, 54, 38, 0.14);
+      --forest: #234f39;
+      --forest-2: #2f6b4d;
+      --sun: #f0a252;
+      --sun-deep: #db7d2e;
+      --blue: #2e5f90;
+      --danger: #b42318;
+      --shadow: 0 24px 60px rgba(29, 40, 34, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "Manrope", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(240, 162, 82, 0.22), transparent 32%),
+        radial-gradient(circle at top right, rgba(46, 95, 144, 0.12), transparent 28%),
+        linear-gradient(180deg, #f8f2e8 0%, #f2eee7 50%, #eef2f5 100%);
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      gap: 22px;
+      align-items: stretch;
+      margin-bottom: 20px;
+    }
+
+    .panel {
+      background: rgba(255, 250, 242, 0.9);
+      border: 1px solid rgba(35, 54, 38, 0.08);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-copy {
+      padding: 28px 28px 30px;
+      background:
+        linear-gradient(140deg, rgba(255,255,255,0.95) 0%, rgba(250,245,237,0.96) 55%, rgba(244,236,225,0.98) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-copy::before,
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+    }
+
+    .hero-copy::before {
+      width: 280px;
+      height: 280px;
+      right: -120px;
+      top: -110px;
+      background: radial-gradient(circle, rgba(240, 162, 82, 0.28) 0%, rgba(240, 162, 82, 0) 70%);
+    }
+
+    .hero-copy::after {
+      width: 220px;
+      height: 220px;
+      left: -100px;
+      bottom: -110px;
+      background: radial-gradient(circle, rgba(46, 95, 144, 0.12) 0%, rgba(46, 95, 144, 0) 72%);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(35, 79, 57, 0.08);
+      border: 1px solid rgba(35, 79, 57, 0.1);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--forest);
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--sun) 0%, var(--sun-deep) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+    }
+
+    .eyebrow {
+      margin-top: 18px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--blue);
+    }
+
+    h1 {
+      margin: 14px 0 14px;
+      font-family: "Fraunces", serif;
+      font-size: clamp(2.2rem, 4vw, 4.2rem);
+      line-height: 0.98;
+      letter-spacing: -0.04em;
+      max-width: 10.5ch;
+    }
+
+    .lead {
+      max-width: 56ch;
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.65;
+      color: var(--sub);
+    }
+
+    .hero-points {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .hero-point {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(35, 54, 38, 0.08);
+    }
+
+    .hero-point strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      color: var(--forest);
+    }
+
+    .hero-point span {
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--sub);
+    }
+
+    .hero-preview {
+      padding: 22px;
+      background: linear-gradient(180deg, rgba(28, 50, 37, 0.98) 0%, rgba(42, 84, 60, 0.95) 100%);
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-preview::before {
+      content: "";
+      position: absolute;
+      inset: auto -40px -70px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(240, 162, 82, 0.34) 0%, rgba(240, 162, 82, 0) 70%);
+    }
+
+    .preview-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .preview-stack {
+      margin-top: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .preview-note {
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .preview-note h2 {
+      margin: 0 0 8px;
+      font-family: "Fraunces", serif;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+
+    .preview-note p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.65;
+      color: rgba(244, 250, 246, 0.84);
+    }
+
+    .mail-shot {
+      padding: 18px;
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(246, 245, 241, 1) 0%, rgba(255, 255, 255, 1) 100%);
+      color: var(--ink);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+
+    .mail-header {
+      padding: 18px 18px 16px;
+      border-radius: 18px 18px 0 0;
+      background: linear-gradient(135deg, #1a2f23 0%, #2d5a3d 60%, #3a7a52 100%);
+      color: #fff;
+    }
+
+    .mail-header strong {
+      display: block;
+      font-size: 22px;
+      font-family: "Fraunces", serif;
+      letter-spacing: -0.03em;
+    }
+
+    .mail-header span {
+      display: block;
+      margin-top: 6px;
+      font-size: 13px;
+      color: rgba(220, 236, 227, 0.88);
+    }
+
+    .mail-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border: 1px solid #e5dfd4;
+      border-top: 0;
+      border-radius: 0 0 18px 18px;
+      overflow: hidden;
+    }
+
+    .mail-stats div {
+      padding: 14px 8px;
+      text-align: center;
+      background: #fff;
+      border-right: 1px solid #e5dfd4;
+    }
+
+    .mail-stats div:last-child { border-right: 0; }
+
+    .mail-stats strong {
+      display: block;
+      font-size: 24px;
+      color: var(--forest);
+      font-family: "Fraunces", serif;
+    }
+
+    .mail-stats span {
+      display: block;
+      margin-top: 4px;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      color: #7b7b7b;
+      text-transform: uppercase;
+    }
+
+    .sample-card {
+      margin-top: 14px;
+      border: 1px solid #e7e1d7;
+      border-radius: 18px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .sample-card h3 {
+      margin: 0 0 10px;
+      font-family: "Fraunces", serif;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+
+    .sample-card p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--sub);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .form-card,
+    .side-card {
+      padding: 24px;
+    }
+
+    .section-title {
+      margin: 0 0 8px;
+      font-family: "Fraunces", serif;
+      font-size: 30px;
+      letter-spacing: -0.03em;
+    }
+
+    .section-copy {
+      margin: 0 0 20px;
+      color: var(--sub);
+      font-size: 14px;
+      line-height: 1.65;
+      max-width: 62ch;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .label-row,
+    .field label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--forest);
+    }
+
+    .label-row a {
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    .field small {
+      display: block;
+      margin-top: 8px;
+      color: var(--sub);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    input,
+    textarea,
+    select,
+    button,
+    a.button-link {
+      font: inherit;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid rgba(35, 54, 38, 0.12);
+      background: rgba(255,255,255,0.82);
+      color: var(--ink);
+      padding: 14px 16px;
+      outline: none;
+      transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.75);
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      border-color: rgba(46, 95, 144, 0.5);
+      box-shadow: 0 0 0 4px rgba(46, 95, 144, 0.12);
+      transform: translateY(-1px);
+    }
+
+    textarea {
+      min-height: 188px;
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    button,
+    a.button-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 0;
+      cursor: pointer;
+      border-radius: 999px;
+      padding: 14px 18px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      transition: transform 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    button:hover,
+    a.button-link:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.62;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .button-primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--forest) 0%, var(--forest-2) 100%);
+      box-shadow: 0 14px 28px rgba(35, 79, 57, 0.18);
+    }
+
+    .button-secondary,
+    .button-link {
+      color: var(--ink);
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(35, 54, 38, 0.12);
+    }
+
+    .status {
+      min-height: 52px;
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(46, 95, 144, 0.14);
+      background: rgba(46, 95, 144, 0.06);
+      color: var(--sub);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .status.error {
+      border-color: rgba(180, 35, 24, 0.16);
+      background: rgba(180, 35, 24, 0.06);
+      color: var(--danger);
+    }
+
+    .side-card h3 {
+      margin: 0 0 12px;
+      font-family: "Fraunces", serif;
+      font-size: 24px;
+      letter-spacing: -0.03em;
+    }
+
+    .steps {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .steps li {
+      padding: 14px 14px 14px 48px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.74);
+      border: 1px solid rgba(35, 54, 38, 0.08);
+      position: relative;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--sub);
+    }
+
+    .steps li::before {
+      content: attr(data-step);
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      color: #fff;
+      background: linear-gradient(135deg, var(--sun) 0%, var(--sun-deep) 100%);
+    }
+
+    .steps strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .scope-box {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(35, 79, 57, 0.95) 0%, rgba(42, 90, 63, 0.95) 100%);
+      color: #f7fbf8;
+    }
+
+    .scope-box strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(230, 244, 236, 0.76);
+    }
+
+    .scope-box p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: rgba(247, 251, 248, 0.9);
+    }
+
+    .foot-note {
+      margin-top: 16px;
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--sub);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-points,
+      .field-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        width: min(100%, calc(100% - 20px));
+        padding: 18px 0 42px;
+      }
+
+      .hero-copy,
+      .hero-preview,
+      .form-card,
+      .side-card {
+        padding: 20px;
+        border-radius: 22px;
+      }
+
+      h1 {
+        max-width: none;
+      }
+
+      .cta-row {
+        flex-direction: column;
+      }
+
+      button,
+      a.button-link {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div>
-      <h1>Paper Morning Web Preview</h1>
-      <p class="muted">No local download, no email sending. Enter your project + Gemini key and open a browser preview that follows the digest email format.</p>
-      <p class="muted">This page retrieves real candidates from arXiv/PubMed, then scores/summarizes with Gemini.</p>
-    </div>
+  <div class="shell">
+    <section class="hero">
+      <div class="panel hero-copy">
+        <div class="brand">
+          <span class="brand-mark">PM</span>
+          <span>Paper Morning</span>
+        </div>
+        <div class="eyebrow">Live browser preview</div>
+        <h1>See what the digest email will actually look like.</h1>
+        <p class="lead">
+          Describe your research focus, paste a Gemini API key, and Paper Morning will generate search
+          queries from your context, retrieve recent papers, rank them, and open the email-style HTML in a new tab.
+          No email is sent from this page.
+        </p>
+        <div class="hero-points">
+          <div class="hero-point">
+            <strong>Context-first</strong>
+            <span>You start with what you are working on, not raw search syntax.</span>
+          </div>
+          <div class="hero-point">
+            <strong>Real retrieval</strong>
+            <span>The preview fetches live candidates from arXiv and PubMed before ranking.</span>
+          </div>
+          <div class="hero-point">
+            <strong>Mail-style output</strong>
+            <span>The result opens as the same kind of digest HTML you would review later.</span>
+          </div>
+          <div class="hero-point">
+            <strong>No install</strong>
+            <span>This quick preview runs entirely in the browser so GitHub visitors can test value first.</span>
+          </div>
+        </div>
+      </div>
 
-    <div class="grid">
-      <div class="card">
-        <label class="label" for="projectName">Project Name</label>
-        <input id="projectName" type="text" placeholder="e.g., Endoscopy foundation model triage" />
+      <div class="panel hero-preview">
+        <div class="preview-badge">What you get</div>
+        <div class="preview-stack">
+          <div class="preview-note">
+            <h2>One click to proof.</h2>
+            <p>
+              This preview is designed to answer the first question immediately:
+              "If I describe my research, will this show me papers I actually care about?"
+            </p>
+          </div>
 
-        <label class="label" for="projectContext" style="margin-top:12px;">Project Context</label>
-        <textarea id="projectContext" placeholder="Describe your current research goal, approach, and what papers you want to see."></textarea>
+          <div class="mail-shot">
+            <div class="mail-header">
+              <strong>Paper Morning</strong>
+              <span>Your paper digest, ranked against your project context.</span>
+            </div>
+            <div class="mail-stats">
+              <div><strong>42</strong><span>Scanned</span></div>
+              <div><strong>5</strong><span>Selected</span></div>
+              <div><strong>9.0</strong><span>Top score</span></div>
+            </div>
+            <div class="sample-card">
+              <h3>Why this matches your work</h3>
+              <p>
+                Each selected paper includes relevance reasoning, a short core-point summary,
+                and a practical note on how you could use it.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-        <label class="label" for="keywords" style="margin-top:12px;">Optional Keywords</label>
-        <input id="keywords" type="text" placeholder="e.g., endoscopy, multimodal, weak supervision, triage" />
+    <section class="layout">
+      <div class="panel form-card">
+        <h2 class="section-title">Run a live preview</h2>
+        <p class="section-copy">
+          Use this page when you are arriving from GitHub and want to understand the product quickly.
+          Your Gemini API key is used for this run only. The page stores only the last generated HTML in local browser storage
+          so you can reopen it without rerunning.
+        </p>
 
-        <div class="row" style="margin-top:12px;">
-          <div>
-            <label class="label" for="outputLang">Output Language</label>
+        <div class="field">
+          <label for="projectName">Project name</label>
+          <input id="projectName" type="text" placeholder="e.g., Endoscopy foundation model triage" />
+          <small>Optional. If left blank, the preview derives a title from your context.</small>
+        </div>
+
+        <div class="field">
+          <label for="projectContext">Research context</label>
+          <textarea id="projectContext" placeholder="Describe what you are building, what data or modality you care about, the task you are focused on, and what kind of recent papers would actually be useful to you."></textarea>
+          <small>Required. The stronger this context is, the more useful the query generation and ranking become.</small>
+        </div>
+
+        <div class="field">
+          <label for="keywords">Optional keywords</label>
+          <input id="keywords" type="text" placeholder="e.g., endoscopy, weak supervision, temporal modeling, retrieval" />
+          <small>Comma separated. These are merged into context-based query generation.</small>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="outputLang">Output language</label>
             <select id="outputLang">
               <option value="en">English</option>
               <option value="ko">Korean</option>
@@ -56,269 +712,916 @@
               <option value="fr">French</option>
             </select>
           </div>
-          <div>
-            <label class="label">Preview Scope</label>
-            <div class="muted" style="padding-top:10px;">Fixed for first-run quality: <b>3 papers</b>, last <b>168 hours</b>.</div>
-          </div>
-        </div>
-      </div>
 
-      <div class="card">
-        <label class="label" for="apiKey">Gemini API Key</label>
-        <input id="apiKey" type="password" placeholder="AIza..." autocomplete="off" />
-
-        <div class="row" style="margin-top:12px; grid-template-columns:1fr;">
-          <div>
-            <label class="label" for="model">Gemini Model</label>
+          <div class="field">
+            <label for="model">Gemini model</label>
             <select id="model">
-              <option value="gemini-3.1-pro" selected>gemini-3.1-pro (default)</option>
-              <option value="gemini-3.1-flash">gemini-3.1-flash</option>
+              <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+              <option value="gemini-3.1-flash" selected>gemini-3.1-flash</option>
               <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             </select>
           </div>
         </div>
 
-        <div class="actions" style="margin-top:14px;">
-          <button class="btn-primary" id="runBtn">Generate Preview (new tab)</button>
-          <button class="btn-ghost" id="openLastBtn" type="button">Open Last Preview</button>
-          <a class="link-btn" href="https://github.com/jeong87/paper-morning" target="_blank" rel="noopener noreferrer">Open Repository</a>
+        <div class="field">
+          <div class="label-row">
+            <label for="apiKey">Gemini API key</label>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Get API key</a>
+          </div>
+          <input id="apiKey" type="password" placeholder="AIza..." autocomplete="off" />
+          <small>The key is never written to disk by this page. It is used only in browser requests for this preview run.</small>
         </div>
-        <div id="status" class="status"></div>
+
+        <div class="cta-row">
+          <button class="button-primary" id="runBtn" type="button">Generate Live Email Preview</button>
+          <button class="button-secondary" id="openLastBtn" type="button">Open Last Preview</button>
+          <a class="button-link" href="https://github.com/jeong87/paper-morning" target="_blank" rel="noopener noreferrer">Open Repository</a>
+        </div>
+
+        <div id="status" class="status">Ready. Fill your context, paste a Gemini key, and run the preview.</div>
       </div>
-    </div>
+
+      <aside class="panel side-card">
+        <h3>What happens when you click run</h3>
+        <ol class="steps">
+          <li data-step="1">
+            <strong>Generate search queries from your context</strong>
+            The page first asks Gemini to turn your project description into topic keywords plus arXiv and PubMed queries.
+          </li>
+          <li data-step="2">
+            <strong>Retrieve recent candidates</strong>
+            It pulls live recent papers from arXiv and PubMed inside a fixed first-run window.
+          </li>
+          <li data-step="3">
+            <strong>Rank the candidates with Gemini</strong>
+            The page then asks Gemini to score relevance and write the short digest explanations.
+          </li>
+          <li data-step="4">
+            <strong>Open the email-style HTML in a new tab</strong>
+            You see the digest output immediately, but nothing is sent by email from this page.
+          </li>
+        </ol>
+
+        <div class="scope-box">
+          <strong>Preview scope</strong>
+          <p>Fixed for a fast first impression: 5 selected papers, last 168 hours, real retrieval from arXiv and PubMed, no email send.</p>
+        </div>
+
+        <p class="foot-note">
+          Browser limitations mean this page focuses on the fastest no-install path. The local install can add more operational controls later,
+          but this preview should already make the product value clear.
+        </p>
+      </aside>
+    </section>
   </div>
 
   <script>
     const FIXED_LOOKBACK_HOURS = 168;
-    const FIXED_PAPER_COUNT = 3;
+    const FIXED_PAPER_COUNT = 5;
     const LLM_MIN_SCORE = 6.0;
     const MODEL_FALLBACK_ORDER = ["gemini-3.1-pro", "gemini-3.1-flash", "gemini-2.5-flash"];
-    const storageKey = "pm_web_preview_last_html_v2";
+    const storageKey = "pm_live_preview_last_html_v3";
     const runBtn = document.getElementById("runBtn");
     const openLastBtn = document.getElementById("openLastBtn");
     const statusEl = document.getElementById("status");
 
-    function escapeHtml(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");}
-    function setStatus(msg, err=false){statusEl.textContent=msg;statusEl.className=err?"status danger":"status";}
-    function unique(items){return [...new Set(items.filter(Boolean))];}
-    function clamp(v,min,max){return Math.min(max,Math.max(min,v));}
-    function toDateSafe(raw){if(!raw)return null;const d=new Date(String(raw).replace(/\//g,"-").replace(" ","T"));return Number.isFinite(d.getTime())?d:null;}
-    function truncateText(v,maxLen=900){const t=String(v||"").replace(/\s+/g," ").trim();return t.length<=maxLen?t:t.slice(0,maxLen-3)+"...";}
-    function extractJsonBlock(raw){const t=String(raw||"").trim();if(!t)return null;try{return JSON.parse(t);}catch{} const f=t.match(/```(?:json)?\s*([\s\S]*?)```/i); if(f&&f[1]){try{return JSON.parse(f[1].trim());}catch{}} const s=t.indexOf("{"), e=t.lastIndexOf("}"); if(s>=0&&e>s){try{return JSON.parse(t.slice(s,e+1));}catch{}} return null;}
-    function toIsoWindow(hours){const now=new Date();const since=new Date(now.getTime()-hours*3600*1000);return {label:`${since.toISOString().slice(0,10)} - ${now.toISOString().slice(0,10)}`};}
-
-    function buildQueryTerms(projectName, projectContext, keywords){
-      const stop = new Set(["the","and","for","with","that","from","your","this","into","using","use","are","was","were","have","has","had","will","would","should","could","research","project","model","models","paper","papers","study","studies","analysis","approach","method","methods","data","system","results"]);
-      const tokenized = `${keywords} ${projectName} ${projectContext}`.toLowerCase().replace(/[^a-z0-9\-\s]/g," ").split(/\s+/).map(t=>t.trim()).filter(t=>t.length>=3&&!stop.has(t));
-      const terms = unique(tokenized).slice(0,8);
-      return terms.length?terms:["medical","imaging","ai"];
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
     }
 
-    async function fetchWithTimeout(url, options={}, timeoutMs=30000){
-      const c = new AbortController(); const timer = setTimeout(()=>c.abort(), timeoutMs);
-      try { return await fetch(url, {...options, signal:c.signal}); } finally { clearTimeout(timer); }
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.className = isError ? "status error" : "status";
     }
-    async function fetchText(url, timeoutMs=30000){const r=await fetchWithTimeout(url,{},timeoutMs); if(!r.ok){const b=await r.text(); throw new Error(`Request failed (${r.status}) for ${url}\n${b.slice(0,200)}`);} return r.text();}
-    async function fetchJson(url, timeoutMs=30000){const r=await fetchWithTimeout(url,{},timeoutMs); if(!r.ok){const b=await r.text(); throw new Error(`Request failed (${r.status}) for ${url}\n${b.slice(0,200)}`);} return r.json();}
 
-    function parseArxivXml(xmlText){
+    function unique(items) {
+      return [...new Set(items.filter(Boolean))];
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function normalizeProjectName(rawName, rawContext) {
+      const trimmed = String(rawName || "").trim();
+      if (trimmed) return trimmed;
+      const tokens = String(rawContext || "")
+        .split(/\s+/)
+        .map((token) => token.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ""))
+        .filter(Boolean)
+        .slice(0, 6);
+      return tokens.length ? tokens.join(" ") : "Preview Research Project";
+    }
+
+    function splitKeywords(raw) {
+      return unique(
+        String(raw || "")
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean)
+      ).slice(0, 10);
+    }
+
+    function toDateSafe(raw) {
+      if (!raw) return null;
+      const parsed = new Date(String(raw).replace(/\//g, "-").replace(" ", "T"));
+      return Number.isFinite(parsed.getTime()) ? parsed : null;
+    }
+
+    function truncateText(value, maxLen = 1100) {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      return text.length <= maxLen ? text : `${text.slice(0, maxLen - 3)}...`;
+    }
+
+    function extractJsonBlock(raw) {
+      const text = String(raw || "").trim();
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch (_) {}
+      const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenced && fenced[1]) {
+        try {
+          return JSON.parse(fenced[1].trim());
+        } catch (_) {}
+      }
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(text.slice(start, end + 1));
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    function outputLanguageDisplayName(lang) {
+      return {
+        en: "English",
+        ko: "Korean",
+        ja: "Japanese",
+        es: "Spanish",
+        fr: "French",
+      }[lang] || "English";
+    }
+
+    function getModelFallbackChain(preferredModel) {
+      return unique([preferredModel, ...MODEL_FALLBACK_ORDER]);
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function fetchText(url, timeoutMs = 30000) {
+      const response = await fetchWithTimeout(url, {}, timeoutMs);
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Request failed (${response.status}) for ${url}\n${body.slice(0, 240)}`);
+      }
+      return response.text();
+    }
+
+    async function fetchJson(url, timeoutMs = 30000) {
+      const response = await fetchWithTimeout(url, {}, timeoutMs);
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Request failed (${response.status}) for ${url}\n${body.slice(0, 240)}`);
+      }
+      return response.json();
+    }
+
+    async function callGeminiJson(prompt, apiKey, preferredModel) {
+      const models = getModelFallbackChain(preferredModel);
+      let lastError = null;
+
+      for (const modelName of models) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const body = {
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: "application/json",
+            },
+          };
+          const response = await fetchWithTimeout(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            },
+            45000
+          );
+
+          if (!response.ok) {
+            const text = await response.text();
+            lastError = new Error(`Gemini ${modelName} failed (${response.status}): ${text.slice(0, 220)}`);
+            if ([404, 429, 500, 503].includes(response.status)) {
+              continue;
+            }
+            throw lastError;
+          }
+
+          const payload = await response.json();
+          const text = (((payload || {}).candidates || [])[0]?.content?.parts || [])
+            .map((part) => part.text || "")
+            .join("\n");
+          const parsed = extractJsonBlock(text);
+          if (!parsed) {
+            lastError = new Error(`Gemini ${modelName} returned non-JSON output.`);
+            continue;
+          }
+          return { parsed, usedModel: modelName };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      throw lastError || new Error("All Gemini model attempts failed.");
+    }
+
+    function buildHeuristicTerms(projectName, projectContext, keywords) {
+      const stop = new Set([
+        "the", "and", "for", "with", "that", "from", "your", "this", "into", "using",
+        "use", "are", "was", "were", "have", "has", "had", "will", "would", "should",
+        "could", "research", "project", "model", "models", "paper", "papers", "study",
+        "studies", "analysis", "approach", "method", "methods", "data", "system", "results"
+      ]);
+      const seedKeywords = splitKeywords(keywords);
+      const tokenized = `${seedKeywords.join(" ")} ${projectName} ${projectContext}`
+        .toLowerCase()
+        .replace(/[^a-z0-9\-\s]/g, " ")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !stop.has(token));
+      return unique([...seedKeywords, ...tokenized]).slice(0, 10);
+    }
+
+    function buildFallbackQuery(source, terms) {
+      const usable = unique(terms.map((term) => String(term || "").trim()).filter(Boolean));
+      if (!usable.length) return "";
+      if (source === "arxiv") {
+        return usable.slice(0, 6).map((term) => `all:${term}`).join(" OR ");
+      }
+      if (source === "pubmed") {
+        return usable.slice(0, 6).map((term) => `"${term}"[Title/Abstract]`).join(" OR ");
+      }
+      return usable.slice(0, 8).join(" ");
+    }
+
+    function buildTopicGenerationPrompt(input) {
+      const mergedContext = input.keywords
+        ? `${input.projectContext} | Keywords: ${input.keywords}`
+        : input.projectContext;
+      const project = {
+        name: input.projectName,
+        context: mergedContext,
+      };
+      return `You are helping configure a medical AI paper alert assistant.
+For the single project below, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.
+Return ONLY JSON object with schema:
+{
+  "topics": [
+    {
+      "name": "...",
+      "keywords": ["..."],
+      "arxiv_query": "...",
+      "pubmed_query": "...",
+      "semantic_scholar_query": "...",
+      "google_scholar_query": "..."
+    }
+  ]
+}
+Rules:
+- create exactly one topic for this project
+- keyword list length: 6..12
+- arXiv query must use all: terms
+- PubMed query should use boolean and quoted phrases where useful
+- avoid over-constrained MeSH-only PubMed queries
+- Semantic Scholar query should be concise plain text
+- Google Scholar query should be concise plain text
+- prioritize precision over recall
+- keep response machine-parseable JSON only
+
+Project JSON:
+${JSON.stringify(project)}`;
+    }
+
+    function normalizeGeneratedTopic(rawTopic, input) {
+      const heuristicTerms = buildHeuristicTerms(input.projectName, input.projectContext, input.keywords);
+      const rawKeywords = Array.isArray(rawTopic?.keywords)
+        ? rawTopic.keywords
+        : splitKeywords(String(rawTopic?.keywords || ""));
+      const keywords = unique(
+        rawKeywords.map((value) => String(value || "").trim()).filter(Boolean).concat(heuristicTerms)
+      ).slice(0, 10);
+      return {
+        name: String(rawTopic?.name || input.projectName || "Preview Research Project").trim(),
+        keywords,
+        arxiv_query: String(rawTopic?.arxiv_query || "").trim() || buildFallbackQuery("arxiv", keywords),
+        pubmed_query: String(rawTopic?.pubmed_query || "").trim() || buildFallbackQuery("pubmed", keywords),
+        semantic_scholar_query: String(rawTopic?.semantic_scholar_query || "").trim() || buildFallbackQuery("semantic", keywords),
+        google_scholar_query: String(rawTopic?.google_scholar_query || "").trim() || buildFallbackQuery("google", keywords),
+      };
+    }
+
+    async function generateTopic(input) {
+      const { parsed, usedModel } = await callGeminiJson(
+        buildTopicGenerationPrompt(input),
+        input.apiKey,
+        input.model
+      );
+      const topics = Array.isArray(parsed?.topics) ? parsed.topics : [];
+      if (!topics.length) {
+        throw new Error("Topic generation returned no usable topic rows.");
+      }
+      return {
+        topic: normalizeGeneratedTopic(topics[0], input),
+        usedModel,
+      };
+    }
+
+    function parseArxivXml(xmlText) {
       const xml = new DOMParser().parseFromString(xmlText, "application/xml");
-      return [...xml.querySelectorAll("entry")].map((entry, idx) => {
-        const idText = entry.querySelector("id")?.textContent?.trim() || `arxiv-${idx+1}`;
+      return [...xml.querySelectorAll("entry")].map((entry, index) => {
+        const idText = entry.querySelector("id")?.textContent?.trim() || `arxiv-${index + 1}`;
         return {
           id: `arxiv:${idText.split("/abs/").pop() || idText}`,
           source: "arXiv",
-          title: entry.querySelector("title")?.textContent?.replace(/\s+/g," ").trim() || "Untitled",
-          abstract: entry.querySelector("summary")?.textContent?.replace(/\s+/g," ").trim() || "",
-          authors: [...entry.querySelectorAll("author > name")].map(n=>n.textContent?.trim()).filter(Boolean).join(", ") || "N/A",
-          url: idText.replace("http://","https://"),
+          title: entry.querySelector("title")?.textContent?.replace(/\s+/g, " ").trim() || "Untitled",
+          abstract: entry.querySelector("summary")?.textContent?.replace(/\s+/g, " ").trim() || "",
+          authors: [...entry.querySelectorAll("author > name")]
+            .map((node) => node.textContent?.trim())
+            .filter(Boolean)
+            .join(", ") || "N/A",
+          url: idText.replace("http://", "https://"),
           published_at: entry.querySelector("published")?.textContent?.trim() || "",
         };
       });
     }
 
-    async function fetchArxivCandidates(terms){
-      const clause = terms.slice(0,5).map(t=>`all:${t}`).join("+OR+");
-      const rawUrl = `https://export.arxiv.org/api/query?search_query=${clause}&start=0&max_results=35&sortBy=submittedDate&sortOrder=descending`;
+    async function fetchArxivCandidates(arxivQuery) {
+      const rawUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery)}&start=0&max_results=35&sortBy=submittedDate&sortOrder=descending`;
       const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(rawUrl)}`;
-      const xmlText = await fetchText(proxyUrl, 35000);
-      return parseArxivXml(xmlText);
+      return parseArxivXml(await fetchText(proxyUrl, 35000));
     }
 
-    function parsePubMedAbstractMap(xmlText){
+    function parsePubMedAbstractMap(xmlText) {
       const xml = new DOMParser().parseFromString(xmlText, "application/xml");
       const map = {};
-      for(const article of [...xml.querySelectorAll("PubmedArticle")]){
-        const pmid = article.querySelector("MedlineCitation > PMID")?.textContent?.trim(); if(!pmid) continue;
-        const parts = [...article.querySelectorAll("Abstract > AbstractText")].map(n=>{const label=n.getAttribute("Label"); const txt=(n.textContent||"").replace(/\s+/g," ").trim(); return txt?(label?`${label}: ${txt}`:txt):"";}).filter(Boolean);
+      for (const article of [...xml.querySelectorAll("PubmedArticle")]) {
+        const pmid = article.querySelector("MedlineCitation > PMID")?.textContent?.trim();
+        if (!pmid) continue;
+        const parts = [...article.querySelectorAll("Abstract > AbstractText")]
+          .map((node) => {
+            const label = node.getAttribute("Label");
+            const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+            if (!text) return "";
+            return label ? `${label}: ${text}` : text;
+          })
+          .filter(Boolean);
         map[pmid] = parts.join(" ");
       }
       return map;
     }
 
-    async function fetchPubMedCandidates(terms){
-      const termClause = terms.slice(0,6).map(t=>`${t}[Title/Abstract]`).join(" OR ");
-      const query = `(${termClause}) AND ("last 7 days"[dp])`;
+    async function fetchPubMedCandidates(pubmedQuery) {
+      const query = `(${pubmedQuery}) AND ("last 7 days"[dp])`;
       const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax=40&term=${encodeURIComponent(query)}`;
       const searchData = await fetchJson(esearchUrl, 30000);
-      const idList = (searchData?.esearchresult?.idlist || []).slice(0,40);
-      if(!idList.length) return [];
+      const idList = (searchData?.esearchresult?.idlist || []).slice(0, 40);
+      if (!idList.length) return [];
       const idsCsv = idList.join(",");
       const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=${encodeURIComponent(idsCsv)}`;
       const summaryData = await fetchJson(summaryUrl, 30000);
       const abstractUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&retmode=xml&id=${encodeURIComponent(idsCsv)}`;
       const abstractMap = parsePubMedAbstractMap(await fetchText(abstractUrl, 35000));
       const result = summaryData?.result || {};
-      return idList.map((pmid)=>{const rec=result[pmid]; if(!rec||typeof rec!=="object") return null; return {
-        id:`pubmed:${pmid}`, source:"PubMed", title:(rec.title||"Untitled").replace(/\s+/g," ").trim(), abstract:abstractMap[pmid]||"",
-        authors:Array.isArray(rec.authors)?rec.authors.map(a=>a?.name).filter(Boolean).join(", "):"N/A",
-        url:`https://pubmed.ncbi.nlm.nih.gov/${pmid}/`, published_at:rec.sortpubdate||rec.pubdate||""
-      };}).filter(Boolean);
+      return idList
+        .map((pmid) => {
+          const record = result[pmid];
+          if (!record || typeof record !== "object") return null;
+          return {
+            id: `pubmed:${pmid}`,
+            source: "PubMed",
+            title: (record.title || "Untitled").replace(/\s+/g, " ").trim(),
+            abstract: abstractMap[pmid] || "",
+            authors: Array.isArray(record.authors)
+              ? record.authors.map((author) => author?.name).filter(Boolean).join(", ")
+              : "N/A",
+            url: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+            published_at: record.sortpubdate || record.pubdate || "",
+          };
+        })
+        .filter(Boolean);
     }
 
-    function filterByLookback(candidates, lookbackHours){
-      const cutoff = Date.now() - lookbackHours*3600*1000;
-      return candidates.filter(p=>{const d=toDateSafe(p.published_at); return d ? d.getTime()>=cutoff : false;});
-    }
-    function dedupeCandidates(candidates){
-      const seen=new Set(), out=[];
-      for(const p of candidates){const key=(p.title||"").toLowerCase().replace(/\s+/g," ").trim(); if(!key||seen.has(key)) continue; seen.add(key); out.push(p);}
-      return out;
+    function filterByLookback(candidates, lookbackHours) {
+      const cutoff = Date.now() - lookbackHours * 3600 * 1000;
+      return candidates.filter((paper) => {
+        const published = toDateSafe(paper.published_at);
+        return published ? published.getTime() >= cutoff : false;
+      });
     }
 
-    function buildScoringPrompt(input, candidates){
-      const compact = candidates.map(p=>({id:p.id,source:p.source,title:p.title,authors:p.authors,published_at:p.published_at,url:p.url,abstract:truncateText(p.abstract)}));
-      return `You are ranking retrieved real papers for a personalized digest preview.\nYou MUST only use candidate IDs provided below.\n\nReturn JSON only in this schema:\n{\"selected\":[{\"id\":\"candidate-id\",\"score\":7.5,\"why\":\"string\",\"core\":\"string\",\"usefulness\":\"string\"}]}\n\nRules:\n- Output language for all explanations: ${input.outputLang}\n- Select exactly ${FIXED_PAPER_COUNT} papers if at least ${FIXED_PAPER_COUNT} candidates exist. Otherwise select all.\n- Score range: 1.0 to 10.0\n- Do not invent IDs. Do not add papers outside candidates.\n- Keep each explanation concise (1-2 sentences).\n- Focus on relevance to the project context.\n\nProject name: ${input.projectName}\nProject context: ${input.projectContext}\nKeywords: ${input.keywords || "N/A"}\n\nCandidates:\n${JSON.stringify(compact)}`;
-    }
-
-    function getModelFallbackChain(preferredModel){ return unique([preferredModel, ...MODEL_FALLBACK_ORDER]); }
-    async function callGeminiJson(prompt, apiKey, preferredModel){
-      const models = getModelFallbackChain(preferredModel); let lastErr = null;
-      for(const modelName of models){
-        try{
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-          const body = {contents:[{role:"user", parts:[{text:prompt}]}], generationConfig:{temperature:0.2, responseMimeType:"application/json"}};
-          const response = await fetchWithTimeout(url,{method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)},45000);
-          if(!response.ok){ const txt = await response.text(); lastErr = new Error(`Gemini ${modelName} failed (${response.status}): ${txt.slice(0,180)}`); if([404,429,500,503].includes(response.status)) continue; throw lastErr; }
-          const payload = await response.json();
-          const text = (((payload || {}).candidates || [])[0]?.content?.parts || []).map(p=>p.text||"").join("\n");
-          const parsed = extractJsonBlock(text); if(!parsed){ lastErr = new Error(`Gemini ${modelName} returned non-JSON output.`); continue; }
-          return {parsed, usedModel:modelName};
-        } catch(err){ lastErr = err; }
+    function dedupeCandidates(candidates) {
+      const seen = new Set();
+      const result = [];
+      for (const paper of candidates) {
+        const key = String(paper.title || "").toLowerCase().replace(/\s+/g, " ").trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(paper);
       }
-      throw (lastErr || new Error("All Gemini model attempts failed."));
+      return result;
     }
 
-    function getFallbackSummary(lang, field){
-      const map={why:{en:"Relevance reason unavailable in this run.",ko:"이번 실행에서는 관련성 근거를 생성하지 못했습니다."},core:{en:"Core finding summary unavailable in this run.",ko:"이번 실행에서는 핵심 요약을 생성하지 못했습니다."},usefulness:{en:"Practical usage note unavailable in this run.",ko:"이번 실행에서는 활용 요약을 생성하지 못했습니다."}};
+    function buildRankingPrompt(input, topic, candidates) {
+      const compact = candidates.map((paper) => ({
+        id: paper.id,
+        title: paper.title,
+        abstract: truncateText(paper.abstract),
+        source: paper.source,
+        published_at_utc: paper.published_at,
+        url: paper.url,
+      }));
+      const outputLanguage = outputLanguageDisplayName(input.outputLang);
+      return `You are a personalized research assistant.
+Evaluate how relevant each paper is to the user's research project.
+
+Project context:
+- Project name: ${input.projectName}
+- Project context: ${input.projectContext}
+- Topic keywords: ${JSON.stringify(topic.keywords)}
+
+For each paper, do the following:
+1) score relevance from 1 to 10
+2) write one short relevance reason in ${outputLanguage}
+3) write core-point summary in ${outputLanguage} using 2-4 short lines
+4) write usefulness explanation in ${outputLanguage} using 2-4 short lines
+5) provide 1-3 evidence spans copied from title/abstract
+
+Return ONLY JSON object:
+{
+  "items": [
+    {
+      "id": "...",
+      "project_name": "...",
+      "relevance_score": 1,
+      "relevance_reason": "...",
+      "core_point": "...",
+      "usefulness": "...",
+      "evidence_spans": ["...", "..."]
+    }
+  ]
+}
+
+Scoring policy:
+- score for practical usefulness to the user's project, not only exact topic overlap
+- direct project matches should score highest, but clearly transferable methods papers may also score well
+- do not over-penalize a paper just because disease or population is different if the modality, task design, evaluation setup, or modeling approach is clearly reusable
+- if overlap is only generic medical AI terminology, usually keep the score in 3-5
+- use this rubric:
+  - 9-10: near-direct project match or must-read paper for the current project
+  - 7-8: strong fit; either direct overlap or highly reusable method, evaluation, or data setup
+  - 5-6: partial or adjacent fit; useful for methodology, baselines, framing, or nearby monitoring
+  - 3-4: weak fit; only broad theme overlap
+  - 1-2: little meaningful connection
+- score >= ${LLM_MIN_SCORE.toFixed(1)} means pass
+- do not hallucinate beyond title and abstract
+
+Papers JSON:
+${JSON.stringify(compact)}`;
+    }
+
+    function getFallbackSummary(lang, field) {
+      const map = {
+        why: {
+          en: "Relevance reason unavailable in this run.",
+          ko: "이번 실행에서는 관련성 근거를 생성하지 못했습니다.",
+          ja: "この実行では関連理由を生成できませんでした。",
+          es: "No se pudo generar la razon de relevancia en esta ejecucion.",
+          fr: "La justification de pertinence n'a pas pu etre generee pour cette execution."
+        },
+        core: {
+          en: "Core finding summary unavailable in this run.",
+          ko: "이번 실행에서는 핵심 요약을 생성하지 못했습니다.",
+          ja: "この実行では要点要約を生成できませんでした。",
+          es: "No se pudo generar el resumen central en esta ejecucion.",
+          fr: "Le resume central n'a pas pu etre genere pour cette execution."
+        },
+        usefulness: {
+          en: "Practical usage note unavailable in this run.",
+          ko: "이번 실행에서는 활용 요약을 생성하지 못했습니다.",
+          ja: "この実行では活用メモを生成できませんでした。",
+          es: "No se pudo generar la nota de uso practico en esta ejecucion.",
+          fr: "La note d'usage pratique n'a pas pu etre generee pour cette execution."
+        }
+      };
       return map[field]?.[lang] || map[field]?.en || "";
     }
 
-    async function scoreCandidates(input, candidates){
-      const limited = candidates.slice(0,30);
-      const {parsed, usedModel} = await callGeminiJson(buildScoringPrompt(input, limited), input.apiKey, input.model);
-      const selectedRaw = Array.isArray(parsed?.selected)?parsed.selected:[];
-      const cMap = new Map(limited.map(p=>[p.id,p]));
-      const scored=[], seen=new Set();
-      for(const row of selectedRaw){
-        const id=String(row?.id||"").trim(); if(!id || seen.has(id)) continue;
-        const base=cMap.get(id); if(!base) continue; seen.add(id);
-        scored.push({...base, score:clamp(Number(row?.score || LLM_MIN_SCORE),1,10), why:String(row?.why||"").trim()||getFallbackSummary(input.outputLang,"why"), core:String(row?.core||"").trim()||getFallbackSummary(input.outputLang,"core"), usefulness:String(row?.usefulness||"").trim()||getFallbackSummary(input.outputLang,"usefulness")});
-      }
-      scored.sort((a,b)=>b.score-a.score);
-      let finalPapers = scored.filter(p=>p.score>=LLM_MIN_SCORE).slice(0,FIXED_PAPER_COUNT);
-      if(finalPapers.length < FIXED_PAPER_COUNT){
-        const fallback = limited.filter(p=>!finalPapers.some(x=>x.id===p.id)).sort((a,b)=>(toDateSafe(b.published_at)?.getTime()||0)-(toDateSafe(a.published_at)?.getTime()||0));
-        for(const p of fallback){
-          finalPapers.push({...p, score:LLM_MIN_SCORE, why:getFallbackSummary(input.outputLang,"why"), core:getFallbackSummary(input.outputLang,"core"), usefulness:getFallbackSummary(input.outputLang,"usefulness")});
-          if(finalPapers.length>=FIXED_PAPER_COUNT) break;
+    async function scoreCandidates(input, topic, candidates) {
+      const limited = candidates.slice(0, 30);
+      const { parsed, usedModel } = await callGeminiJson(
+        buildRankingPrompt(input, topic, limited),
+        input.apiKey,
+        input.model
+      );
+      const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
+      const candidateById = new Map(limited.map((paper) => [paper.id, paper]));
+      const scored = [];
+      const seen = new Set();
+
+      for (const row of rawItems) {
+        const id = String(row?.id || "").trim();
+        if (!id || seen.has(id)) continue;
+        const base = candidateById.get(id);
+        if (!base) continue;
+        seen.add(id);
+        const evidence = Array.isArray(row?.evidence_spans)
+          ? row.evidence_spans.map((value) => String(value || "").trim()).filter(Boolean).slice(0, 3)
+          : [];
+        scored.push({
+          ...base,
+          score: clamp(Number(row?.relevance_score || 0), 1, 10),
+          why: String(row?.relevance_reason || "").trim() || getFallbackSummary(input.outputLang, "why"),
+          core: String(row?.core_point || "").trim() || getFallbackSummary(input.outputLang, "core"),
+          usefulness: String(row?.usefulness || "").trim() || getFallbackSummary(input.outputLang, "usefulness"),
+          evidence_spans: evidence,
+        });
+        if (scored[scored.length - 1].score >= 7 && evidence.length === 0) {
+          scored[scored.length - 1].score = 5.5;
         }
       }
-      return {papers:finalPapers.slice(0,FIXED_PAPER_COUNT), usedModel};
-    }
 
-    function renderPreviewHtml(payload, meta){
-      const papers = Array.isArray(payload?.papers) ? payload.papers : [];
-      const topScore = papers.reduce((m,p)=>Math.max(m, Number(p.score||0)),0);
-      const sources = [...new Set(papers.map(p=>p.source||"Unknown"))].join(" | ") || "N/A";
-      const diagnostics = Array.isArray(payload?.diagnostics) ? payload.diagnostics : [];
-      const cards = papers.map((p,idx)=>{const title=escapeHtml(p.title||`Untitled #${idx+1}`), authors=escapeHtml(p.authors||"N/A"), source=escapeHtml(p.source||"Unknown"), score=Number(p.score||0).toFixed(1), url=String(p.url||"").trim(), why=escapeHtml(p.why||getFallbackSummary(meta.outputLang,"why")), core=escapeHtml(p.core||getFallbackSummary(meta.outputLang,"core")), useful=escapeHtml(p.usefulness||getFallbackSummary(meta.outputLang,"usefulness")); const titleHtml=url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#111827;text-decoration:none;">${title}</a>`:title; return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;"><tr><td style="padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#fafaf9;"><div style="font-size:12px;color:#6b7280;font-weight:600;">#${idx+1} · ${source} · Score ${score}</div></td></tr><tr><td style="padding:14px 16px 16px;"><div style="font-size:18px;line-height:1.35;font-weight:700;margin-bottom:8px;">${titleHtml}</div><div style="font-size:12px;color:#6b7280;margin-bottom:12px;">${authors}</div><div style="padding:10px 12px;border-left:3px solid #245339;background:#eaf5ef;border-radius:6px;margin-bottom:8px;"><div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#245339;">Why this matches your work</div><div style="font-size:13px;color:#334155;margin-top:4px;">${why}</div></div><div style="padding:10px 12px;border-left:3px solid #9a8f75;background:#f8f6f1;border-radius:6px;margin-bottom:8px;"><div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#766c57;">Key finding</div><div style="font-size:13px;color:#334155;margin-top:4px;">${core}</div></div><div style="padding:10px 12px;border-left:3px solid #557fb3;background:#f2f7fd;border-radius:6px;"><div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#476d9a;">How you can use this</div><div style="font-size:13px;color:#334155;margin-top:4px;">${useful}</div></div></td></tr></table>`;}).join("");
-      const diagnosticsHtml = diagnostics.length ? `<div style="margin:8px 0 12px;padding:10px 12px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#475569;font-size:12px;line-height:1.5;">${diagnostics.map(line=>escapeHtml(line)).join("<br/>")}</div>` : "";
-      return `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Paper Morning Preview</title></head><body style="margin:0;background:#e8e6e1;font-family:Arial,sans-serif;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:22px 0;"><tr><td align="center"><table role="presentation" width="700" cellpadding="0" cellspacing="0" style="background:#f6f5f1;border:1px solid #e5e3de;border-radius:12px;overflow:hidden;"><tr><td style="padding:28px 26px 22px;background:linear-gradient(135deg,#1a2f23,#2d5a3d 60%,#3a7a52);color:#fff;"><div style="font-size:24px;font-weight:700;">Paper Morning</div><div style="font-size:14px;color:#d9e7de;margin-top:6px;">Web Preview (real retrieved candidates)</div><div style="font-size:12px;color:#bfd3c8;margin-top:10px;">Window: ${escapeHtml(payload.window || `Last ${FIXED_LOOKBACK_HOURS}h`)}</div><div style="font-size:12px;color:#bfd3c8;margin-top:4px;">Sources: ${escapeHtml(sources)}</div><div style="font-size:12px;color:#bfd3c8;margin-top:4px;">Model used: ${escapeHtml(meta.usedModel || meta.model)}</div></td></tr><tr><td style="padding:16px 20px 8px;background:#fff;border-bottom:1px solid #e5e3de;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e3de;border-radius:10px;"><tr><td align="center" style="padding:10px;border-right:1px solid #e5e3de;"><div style="font-size:22px;font-weight:700;color:#245339;">${escapeHtml(String(payload.scanned || 0))}</div><div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">SCANNED</div></td><td align="center" style="padding:10px;border-right:1px solid #e5e3de;"><div style="font-size:22px;font-weight:700;color:#245339;">${papers.length}</div><div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">SELECTED</div></td><td align="center" style="padding:10px;"><div style="font-size:22px;font-weight:700;color:#245339;">${topScore.toFixed(1)}</div><div style="font-size:10px;letter-spacing:.08em;color:#6b7280;">TOP SCORE</div></td></tr></table>${diagnosticsHtml}</td></tr><tr><td style="padding:14px 20px 4px;">${cards || '<div style="padding:14px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">No papers generated.</div>'}</td></tr><tr><td style="padding:12px 20px 18px;background:#fff;border-top:1px solid #e5e3de;text-align:center;color:#6b7280;font-size:11px;">Generated in browser only · Project: ${escapeHtml(meta.projectName)} · Language: ${escapeHtml(meta.outputLang)}</td></tr></table></td></tr></table></body></html>`;
-    }
+      scored.sort((left, right) => right.score - left.score);
+      let finalPapers = scored.filter((paper) => paper.score >= LLM_MIN_SCORE).slice(0, FIXED_PAPER_COUNT);
 
-    function getInputValues(){
+      if (finalPapers.length < FIXED_PAPER_COUNT) {
+        const fallback = limited
+          .filter((paper) => !finalPapers.some((existing) => existing.id === paper.id))
+          .sort((left, right) => (toDateSafe(right.published_at)?.getTime() || 0) - (toDateSafe(left.published_at)?.getTime() || 0));
+        for (const paper of fallback) {
+          finalPapers.push({
+            ...paper,
+            score: 5.5,
+            why: getFallbackSummary(input.outputLang, "why"),
+            core: getFallbackSummary(input.outputLang, "core"),
+            usefulness: getFallbackSummary(input.outputLang, "usefulness"),
+            evidence_spans: [],
+          });
+          if (finalPapers.length >= FIXED_PAPER_COUNT) break;
+        }
+      }
+
       return {
-        projectName: document.getElementById("projectName").value.trim(),
-        projectContext: document.getElementById("projectContext").value.trim(),
-        keywords: document.getElementById("keywords").value.trim(),
-        outputLang: document.getElementById("outputLang").value,
-        apiKey: document.getElementById("apiKey").value.trim(),
-        model: document.getElementById("model").value.trim() || "gemini-3.1-pro",
+        papers: finalPapers.slice(0, FIXED_PAPER_COUNT),
+        usedModel,
       };
     }
 
-    runBtn.addEventListener("click", async () => {
-      const input = getInputValues();
-      if(!input.projectName || !input.projectContext){ setStatus("Project name and project context are required.", true); return; }
-      if(!input.apiKey){ setStatus("Gemini API key is required.", true); return; }
+    function toIsoWindow(hours) {
+      const now = new Date();
+      const since = new Date(now.getTime() - hours * 3600 * 1000);
+      return `${since.toISOString().slice(0, 10)} - ${now.toISOString().slice(0, 10)}`;
+    }
 
-      const previewWindow = window.open("about:blank", "pm-web-preview");
-      if(!previewWindow){ setStatus("Popup blocked. Allow popups for this site and try again.", true); return; }
-      previewWindow.document.write("<!doctype html><html><body style='font-family:Arial,sans-serif;padding:20px;'>Collecting papers and generating preview... please wait.</body></html>");
+    function renderPills(items, className = "") {
+      return (Array.isArray(items) ? items : [])
+        .filter(Boolean)
+        .map((item) => `<span class="${className}">${escapeHtml(item)}</span>`)
+        .join("");
+    }
+
+    function renderPreviewHtml(payload, meta) {
+      const papers = Array.isArray(payload?.papers) ? payload.papers : [];
+      const diagnostics = Array.isArray(payload?.diagnostics) ? payload.diagnostics : [];
+      const topScore = papers.reduce((max, paper) => Math.max(max, Number(paper.score || 0)), 0);
+      const sources = [...new Set(papers.map((paper) => paper.source || "Unknown"))].join(" | ") || "N/A";
+      const topic = payload?.topic || {};
+      const keywordChips = renderPills(topic.keywords || [], "pm-keyword-chip");
+      const diagnosticsHtml = diagnostics.length
+        ? `<div class="pm-diagnostics">${diagnostics.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>`
+        : "";
+
+      const cards = papers.map((paper, index) => {
+        const title = escapeHtml(paper.title || `Untitled #${index + 1}`);
+        const source = escapeHtml(paper.source || "Unknown");
+        const authors = escapeHtml(paper.authors || "N/A");
+        const score = Number(paper.score || 0).toFixed(1);
+        const url = String(paper.url || "").trim();
+        const evidenceChips = renderPills(paper.evidence_spans || [], "pm-evidence-chip");
+        const titleHtml = url
+          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>`
+          : title;
+        return `
+          <article class="pm-paper-card">
+            <div class="pm-paper-top">
+              <div class="pm-paper-rank">#${index + 1}</div>
+              <div class="pm-paper-meta">${source} | Score ${score}</div>
+            </div>
+            <h2>${titleHtml}</h2>
+            <div class="pm-paper-authors">${authors}</div>
+            ${evidenceChips ? `<div class="pm-evidence-wrap">${evidenceChips}</div>` : ""}
+            <div class="pm-callout pm-callout-why">
+              <strong>Why this matches your work</strong>
+              <p>${escapeHtml(paper.why || getFallbackSummary(meta.outputLang, "why"))}</p>
+            </div>
+            <div class="pm-callout pm-callout-core">
+              <strong>Key finding</strong>
+              <p>${escapeHtml(paper.core || getFallbackSummary(meta.outputLang, "core"))}</p>
+            </div>
+            <div class="pm-callout pm-callout-use">
+              <strong>How you can use this</strong>
+              <p>${escapeHtml(paper.usefulness || getFallbackSummary(meta.outputLang, "usefulness"))}</p>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paper Morning Preview</title>
+  <style>
+    :root {
+      --paper: #f6f5f1;
+      --paper-edge: #e5e3de;
+      --forest: #245339;
+      --ink: #17212b;
+      --sub: #5c6672;
+      --why-bg: #eaf5ef;
+      --core-bg: #f7f3ea;
+      --use-bg: #eef5fc;
+      --why-line: #245339;
+      --core-line: #9a8f75;
+      --use-line: #557fb3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #efe8dd 0%, #e6ecef 100%);
+      font-family: Arial, sans-serif;
+      color: var(--ink);
+    }
+    .pm-wrap {
+      width: min(960px, calc(100% - 20px));
+      margin: 22px auto;
+    }
+    .pm-shell {
+      background: var(--paper);
+      border: 1px solid var(--paper-edge);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 22px 54px rgba(17, 24, 39, 0.12);
+    }
+    .pm-header {
+      padding: 30px 28px 24px;
+      background: linear-gradient(135deg, #1a2f23 0%, #2d5a3d 60%, #3a7a52 100%);
+      color: #fff;
+    }
+    .pm-header h1 { margin: 0; font-size: 30px; line-height: 1.05; }
+    .pm-header p { margin: 8px 0 0; color: rgba(220, 236, 227, 0.88); font-size: 14px; line-height: 1.55; }
+    .pm-meta { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; font-size: 12px; }
+    .pm-meta span { color: rgba(168, 196, 180, 0.94); display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
+    .pm-meta strong { color: #fff; display: block; line-height: 1.45; }
+    .pm-summary { padding: 18px 22px 10px; background: #fff; border-bottom: 1px solid var(--paper-edge); }
+    .pm-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--paper-edge); border-radius: 14px; overflow: hidden; background: #fff; }
+    .pm-stats > div { padding: 14px 10px; text-align: center; border-right: 1px solid var(--paper-edge); }
+    .pm-stats > div:last-child { border-right: 0; }
+    .pm-stats strong { display: block; color: var(--forest); font-size: 28px; line-height: 1; }
+    .pm-stats span { display: block; margin-top: 6px; color: #7a7f85; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .pm-topic-card { margin-top: 14px; padding: 16px; border-radius: 14px; border: 1px solid var(--paper-edge); background: #fcfbf8; }
+    .pm-topic-card h3 { margin: 0 0 10px; font-size: 16px; }
+    .pm-topic-card p { margin: 6px 0 0; font-size: 12px; line-height: 1.55; color: var(--sub); word-break: break-word; }
+    .pm-keyword-row, .pm-evidence-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .pm-keyword-chip, .pm-evidence-chip { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .pm-keyword-chip { background: #edf3ef; color: var(--forest); border: 1px solid rgba(36, 83, 57, 0.08); }
+    .pm-evidence-chip { background: #f1f5fa; color: #456786; border: 1px solid rgba(69, 103, 134, 0.08); }
+    .pm-diagnostics { margin-top: 14px; padding: 14px 16px; border-radius: 14px; border: 1px dashed #c8d2dc; background: #f8fafc; color: #475569; font-size: 12px; line-height: 1.6; }
+    .pm-diagnostics div + div { margin-top: 6px; }
+    .pm-body { padding: 18px 22px 8px; }
+    .pm-paper-card { margin-bottom: 16px; padding: 18px; border-radius: 18px; border: 1px solid var(--paper-edge); background: #fff; }
+    .pm-paper-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+    .pm-paper-rank { font-size: 12px; font-weight: 700; color: var(--forest); letter-spacing: 0.08em; text-transform: uppercase; }
+    .pm-paper-meta { font-size: 12px; color: var(--sub); }
+    .pm-paper-card h2 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; letter-spacing: -0.03em; }
+    .pm-paper-card h2 a { color: var(--ink); text-decoration: none; }
+    .pm-paper-card h2 a:hover { text-decoration: underline; }
+    .pm-paper-authors { color: var(--sub); font-size: 13px; line-height: 1.55; }
+    .pm-callout { margin-top: 12px; padding: 14px 14px 14px 16px; border-radius: 14px; border-left: 4px solid transparent; }
+    .pm-callout strong { display: block; margin-bottom: 6px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .pm-callout p { margin: 0; font-size: 13px; line-height: 1.65; color: #334155; white-space: pre-wrap; }
+    .pm-callout-why { background: var(--why-bg); border-color: var(--why-line); }
+    .pm-callout-why strong { color: var(--why-line); }
+    .pm-callout-core { background: var(--core-bg); border-color: var(--core-line); }
+    .pm-callout-core strong { color: #756950; }
+    .pm-callout-use { background: var(--use-bg); border-color: var(--use-line); }
+    .pm-callout-use strong { color: #456786; }
+    .pm-footer { padding: 16px 22px 20px; border-top: 1px solid var(--paper-edge); background: #fff; color: #7a7f85; font-size: 11px; line-height: 1.6; text-align: center; }
+    @media (max-width: 760px) {
+      .pm-wrap { width: min(100%, calc(100% - 12px)); }
+      .pm-header, .pm-summary, .pm-body, .pm-footer { padding-left: 14px; padding-right: 14px; }
+      .pm-meta, .pm-stats { grid-template-columns: 1fr; }
+      .pm-stats > div { border-right: 0; border-bottom: 1px solid var(--paper-edge); }
+      .pm-stats > div:last-child { border-bottom: 0; }
+      .pm-paper-top { flex-direction: column; align-items: flex-start; }
+      .pm-paper-card h2 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="pm-wrap">
+    <div class="pm-shell">
+      <div class="pm-header">
+        <h1>Paper Morning</h1>
+        <p>Live preview generated in browser. This is the digest-style HTML only; no email was sent.</p>
+        <div class="pm-meta">
+          <div><span>Project</span><strong>${escapeHtml(meta.projectName)}</strong></div>
+          <div><span>Window</span><strong>${escapeHtml(payload.window || `Last ${FIXED_LOOKBACK_HOURS}h`)}</strong></div>
+          <div><span>Sources</span><strong>${escapeHtml(sources)}</strong></div>
+          <div><span>Gemini model</span><strong>${escapeHtml(meta.usedModel || meta.model)}</strong></div>
+        </div>
+      </div>
+      <div class="pm-summary">
+        <div class="pm-stats">
+          <div><strong>${escapeHtml(String(payload.scanned || 0))}</strong><span>Scanned</span></div>
+          <div><strong>${papers.length}</strong><span>Selected</span></div>
+          <div><strong>${topScore.toFixed(1)}</strong><span>Top score</span></div>
+        </div>
+        <div class="pm-topic-card">
+          <h3>Generated search profile</h3>
+          <div class="pm-keyword-row">${keywordChips || '<span class="pm-keyword-chip">No keywords generated</span>'}</div>
+          <p><strong>arXiv query:</strong> ${escapeHtml(topic.arxiv_query || "N/A")}</p>
+          <p><strong>PubMed query:</strong> ${escapeHtml(topic.pubmed_query || "N/A")}</p>
+        </div>
+        ${diagnosticsHtml}
+      </div>
+      <div class="pm-body">
+        ${cards || '<div class="pm-paper-card"><h2>No papers generated</h2><p class="pm-paper-authors">Try a more specific context or keywords.</p></div>'}
+      </div>
+      <div class="pm-footer">
+        Preview generated in browser only. Project: ${escapeHtml(meta.projectName)} | Output language: ${escapeHtml(meta.outputLang)} | No email sent.
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+    }
+
+    function getInputValues() {
+      const rawProjectName = document.getElementById("projectName").value.trim();
+      const projectContext = document.getElementById("projectContext").value.trim();
+      return {
+        projectName: normalizeProjectName(rawProjectName, projectContext),
+        projectContext,
+        keywords: document.getElementById("keywords").value.trim(),
+        outputLang: document.getElementById("outputLang").value,
+        apiKey: document.getElementById("apiKey").value.trim(),
+        model: document.getElementById("model").value.trim() || "gemini-3.1-flash",
+      };
+    }
+
+    function buildLoadingMarkup(projectName) {
+      return `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Paper Morning Preview</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(180deg,#f8f2e8 0%,#edf1f4 100%);font-family:Arial,sans-serif;color:#1b2430}.loading-card{width:min(640px,calc(100% - 24px));padding:28px;border-radius:22px;background:rgba(255,255,255,0.92);border:1px solid rgba(35,54,38,0.08);box-shadow:0 18px 48px rgba(29,40,34,0.12)}h1{margin:0 0 10px;font-size:30px;line-height:1.05}p{margin:0;font-size:14px;line-height:1.7;color:#5a6473}.line{margin-top:14px;height:10px;border-radius:999px;background:linear-gradient(90deg,rgba(35,79,57,0.16),rgba(240,162,82,0.22),rgba(35,79,57,0.16));animation:shimmer 1.4s linear infinite;background-size:200% 100%}@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}</style></head><body><div class="loading-card"><h1>Generating your Paper Morning preview</h1><p>Project: ${escapeHtml(projectName)}</p><p style="margin-top:8px;">The page is generating search queries, retrieving recent papers, ranking them, and composing the email-style HTML. This can take around 30-90 seconds depending on source and API latency.</p><div class="line"></div></div></body></html>`;
+    }
+
+    async function runPreview() {
+      const input = getInputValues();
+      if (!input.projectContext) {
+        setStatus("Research context is required.", true);
+        return;
+      }
+      if (!input.apiKey) {
+        setStatus("Gemini API key is required.", true);
+        return;
+      }
+
+      const previewWindow = window.open("about:blank", "pm-live-preview");
+      if (!previewWindow) {
+        setStatus("Popup blocked. Allow popups for this site and try again.", true);
+        return;
+      }
+
+      previewWindow.document.open();
+      previewWindow.document.write(buildLoadingMarkup(input.projectName));
       previewWindow.document.close();
 
       runBtn.disabled = true;
       const diagnostics = [];
-      try{
-        const queryTerms = buildQueryTerms(input.projectName, input.projectContext, input.keywords);
-        diagnostics.push(`Query terms: ${queryTerms.join(", ")}`);
-        setStatus("Collecting real candidates from arXiv and PubMed...");
 
-        const [aRes, pRes] = await Promise.allSettled([fetchArxivCandidates(queryTerms), fetchPubMedCandidates(queryTerms)]);
-        const arxivCandidates = aRes.status === "fulfilled" ? aRes.value : [];
-        const pubmedCandidates = pRes.status === "fulfilled" ? pRes.value : [];
-        if(aRes.status !== "fulfilled") diagnostics.push(`arXiv fetch warning: ${String(aRes.reason?.message || aRes.reason)}`);
-        if(pRes.status !== "fulfilled") diagnostics.push(`PubMed fetch warning: ${String(pRes.reason?.message || pRes.reason)}`);
+      try {
+        setStatus("Generating source queries from your research context...");
+        const topicResult = await generateTopic(input);
+        const topic = topicResult.topic;
+        diagnostics.push(`Topic generated with Gemini model: ${topicResult.usedModel}`);
+        diagnostics.push(`Topic name: ${topic.name}`);
+        diagnostics.push(`Keywords: ${topic.keywords.join(", ")}`);
+
+        setStatus("Retrieving recent candidates from arXiv and PubMed...");
+        const [arxivResult, pubmedResult] = await Promise.allSettled([
+          fetchArxivCandidates(topic.arxiv_query),
+          fetchPubMedCandidates(topic.pubmed_query),
+        ]);
+
+        const arxivCandidates = arxivResult.status === "fulfilled" ? arxivResult.value : [];
+        const pubmedCandidates = pubmedResult.status === "fulfilled" ? pubmedResult.value : [];
+        if (arxivResult.status !== "fulfilled") diagnostics.push(`arXiv fetch warning: ${String(arxivResult.reason?.message || arxivResult.reason)}`);
+        if (pubmedResult.status !== "fulfilled") diagnostics.push(`PubMed fetch warning: ${String(pubmedResult.reason?.message || pubmedResult.reason)}`);
 
         const allCandidates = dedupeCandidates([...arxivCandidates, ...pubmedCandidates]);
         const scannedTotal = allCandidates.length;
         let filteredCandidates = filterByLookback(allCandidates, FIXED_LOOKBACK_HOURS);
-        if(filteredCandidates.length===0 && scannedTotal>0){ diagnostics.push("No paper remained after 168h filter; using freshest retrieved candidates."); filteredCandidates = allCandidates.slice(0,20); }
-        diagnostics.push(`Collected candidates: arXiv ${arxivCandidates.length}, PubMed ${pubmedCandidates.length}, total ${scannedTotal}`);
-        diagnostics.push(`After time filter (168h): ${filteredCandidates.length}`);
-        if(filteredCandidates.length===0) throw new Error("No candidates were retrieved. Try different keywords or context.");
+        diagnostics.push(`Retrieved candidates: arXiv ${arxivCandidates.length}, PubMed ${pubmedCandidates.length}, total ${scannedTotal}`);
+        diagnostics.push(`Candidates inside ${FIXED_LOOKBACK_HOURS}h window: ${filteredCandidates.length}`);
+        if (!filteredCandidates.length && scannedTotal > 0) {
+          diagnostics.push("No candidates remained after the time filter, so the freshest retrieved candidates were used instead.");
+          filteredCandidates = allCandidates.slice(0, 20);
+        }
+        if (!filteredCandidates.length) {
+          throw new Error("No candidates were retrieved. Try a more specific context or a different keyword mix.");
+        }
 
-        setStatus("Scoring and summarizing retrieved candidates with Gemini...");
-        const scoring = await scoreCandidates(input, filteredCandidates);
-        diagnostics.push(`LLM model used: ${scoring.usedModel}`);
-        diagnostics.push(`Final included: ${scoring.papers.length}`);
+        setStatus("Ranking and summarizing the retrieved candidates with Gemini...");
+        const scoring = await scoreCandidates(input, topic, filteredCandidates);
+        diagnostics.push(`Ranking model used: ${scoring.usedModel}`);
+        diagnostics.push(`Final selected papers: ${scoring.papers.length}`);
 
         const payload = {
-          window: toIsoWindow(FIXED_LOOKBACK_HOURS).label,
+          window: toIsoWindow(FIXED_LOOKBACK_HOURS),
           scanned: scannedTotal,
           diagnostics,
-          papers: scoring.papers.map(p=>({title:p.title,authors:p.authors,source:p.source,score:p.score,url:p.url,why:p.why,core:p.core,usefulness:p.usefulness}))
+          topic,
+          papers: scoring.papers.map((paper) => ({
+            title: paper.title,
+            authors: paper.authors,
+            source: paper.source,
+            score: paper.score,
+            url: paper.url,
+            why: paper.why,
+            core: paper.core,
+            usefulness: paper.usefulness,
+            evidence_spans: paper.evidence_spans,
+          })),
         };
-        const html = renderPreviewHtml(payload, {...input, usedModel: scoring.usedModel});
+
+        const html = renderPreviewHtml(payload, { ...input, usedModel: scoring.usedModel });
         localStorage.setItem(storageKey, html);
-        previewWindow.document.open(); previewWindow.document.write(html); previewWindow.document.close();
-        setStatus(`Preview generated with real retrieved papers.\nScanned: ${scannedTotal}, filtered: ${filteredCandidates.length}, selected: ${payload.papers.length}\nModel used: ${scoring.usedModel}`);
-      } catch(err){
-        previewWindow.close();
-        setStatus(String(err && err.message ? err.message : err), true);
+        previewWindow.document.open();
+        previewWindow.document.write(html);
+        previewWindow.document.close();
+
+        setStatus(`Preview generated.\nTopic: ${topic.name}\nScanned: ${scannedTotal}, selected: ${payload.papers.length}\nGemini ranking model: ${scoring.usedModel}`);
+      } catch (error) {
+        try {
+          previewWindow.close();
+        } catch (_) {}
+        setStatus(String(error && error.message ? error.message : error), true);
       } finally {
         runBtn.disabled = false;
       }
-    });
+    }
 
-    openLastBtn.addEventListener("click", () => {
+    function openLastPreview() {
       const cached = localStorage.getItem(storageKey);
-      if(!cached){ setStatus("No local preview cache found yet. Generate one first.", true); return; }
-      const previewWindow = window.open("about:blank", "pm-web-preview");
-      if(!previewWindow){ setStatus("Popup blocked. Allow popups for this site and try again.", true); return; }
-      previewWindow.document.open(); previewWindow.document.write(cached); previewWindow.document.close();
-      setStatus("Opened cached preview in a new tab.");
+      if (!cached) {
+        setStatus("No local preview cache found yet. Generate one first.", true);
+        return;
+      }
+      const previewWindow = window.open("about:blank", "pm-live-preview");
+      if (!previewWindow) {
+        setStatus("Popup blocked. Allow popups for this site and try again.", true);
+        return;
+      }
+      previewWindow.document.open();
+      previewWindow.document.write(cached);
+      previewWindow.document.close();
+      setStatus("Opened the last generated preview in a new tab.");
+    }
+
+    runBtn.addEventListener("click", runPreview);
+    openLastBtn.addEventListener("click", openLastPreview);
+
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        runPreview();
+      }
     });
   </script>
 </body>

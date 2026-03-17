@@ -77,12 +77,92 @@ SECRET_REF_PREFIX = "keyring://"
 KEYRING_SERVICE_NAME = "paper-morning"
 GOOGLE_OAUTH_BUNDLE_FILENAME = "google_oauth_bundle.json"
 INTERNAL_SCHEDULE_ADVANCE_MINUTES = 13
+LLM_RELEVANCE_MODE_DEFAULT = "balanced"
+LLM_RELEVANCE_MODE_POLICIES: Dict[str, Dict[str, Any]] = {
+    "strict": {
+        "label": "Strict",
+        "threshold": 7.5,
+        "prompt_lines": [
+            "Optimize for precision over breadth.",
+            "Prefer papers that directly overlap in task, modality, target population, evaluation setup, or deployment goal.",
+            "Adjacent methods papers can still score, but only if the reuse path is concrete and unusually strong.",
+            "Broad theme overlap without direct execution value should usually stay in 1-4.",
+            "Use this rubric:",
+            "  9-10: near-direct project match or clear must-read for the active project.",
+            "  7-8: strong fit with only minor mismatch; 8+ should feel directly actionable soon.",
+            "  5-6: adjacent but useful method or baseline reference; interesting, but not core.",
+            "  3-4: weak fit; broad domain similarity only.",
+            "  1-2: little meaningful connection.",
+        ],
+    },
+    "balanced": {
+        "label": "Balanced",
+        "threshold": 6.0,
+        "prompt_lines": [
+            "Score for practical usefulness to the user's project, not only exact topic overlap.",
+            "Direct project matches should score highest, but clearly transferable methods papers may also score well.",
+            "Do not over-penalize a paper just because disease/population is different if the modality, task design, evaluation setup, or modeling approach is clearly reusable.",
+            "If overlap is only generic buzzwords (e.g., 'medical AI', 'foundation model') with no concrete methodological or clinical connection, usually keep the score in 3-5.",
+            "Use this rubric:",
+            "  9-10: near-direct project match or must-read paper for the current project.",
+            "  7-8: strong fit; either direct overlap or highly reusable method/evaluation/data setup.",
+            "  5-6: partial or adjacent fit; useful for methodology, baselines, framing, or monitoring nearby work.",
+            "  3-4: weak fit; only broad theme overlap.",
+            "  1-2: little meaningful connection.",
+            "Use the full range when justified. Do not force most papers into 3-6 if several are genuinely strong.",
+            "Be selective, but allow adjacent high-utility papers to pass when the reuse case is concrete.",
+        ],
+    },
+    "discovery": {
+        "label": "Discovery",
+        "threshold": 5.0,
+        "prompt_lines": [
+            "Optimize for high-upside discovery, not only immediate direct overlap.",
+            "Reward papers that can expand the user's search space through reusable methods, datasets, evaluation ideas, or problem reframing.",
+            "Allow domain, population, or modality mismatch when the methodological transfer path is concrete and credible.",
+            "Still keep generic buzzword overlap low; curiosity alone is not enough.",
+            "Use this rubric:",
+            "  9-10: direct match or exceptionally high-upside adjacent paper that could materially change the project.",
+            "  7-8: strong adjacent fit with clear reuse potential in method, benchmark, or data strategy.",
+            "  5-6: exploratory but worthwhile; useful for idea expansion, baselines, nearby tasks, or future iteration.",
+            "  3-4: weak exploratory signal; interesting but hard to connect concretely.",
+            "  1-2: little meaningful value for this project.",
+            "Let promising adjacent work pass when the usefulness explanation is concrete.",
+        ],
+    },
+}
+
+
+def normalize_relevance_mode(raw: Any) -> str:
+    value = clean_text(str(raw or "")).lower()
+    if value in {"strict", "precision", "precise"}:
+        return "strict"
+    if value in {"discovery", "discover", "explore", "exploratory"}:
+        return "discovery"
+    return LLM_RELEVANCE_MODE_DEFAULT
+
+
+def get_relevance_mode_policy(mode: str) -> Dict[str, Any]:
+    return LLM_RELEVANCE_MODE_POLICIES[normalize_relevance_mode(mode)]
+
+
+def relevance_mode_label(mode: str) -> str:
+    return str(get_relevance_mode_policy(mode).get("label", "Balanced"))
+
+
+def relevance_mode_threshold(mode: str, fallback_threshold: float) -> float:
+    policy = get_relevance_mode_policy(mode)
+    value = policy.get("threshold")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return fallback_threshold
 
 
 @dataclass
 class TopicProfile:
     name: str
     keywords: Dict[str, float]
+    relevance_mode: str = LLM_RELEVANCE_MODE_DEFAULT
 
 
 @dataclass
@@ -104,6 +184,9 @@ class Paper:
     source: str
     score: float = 0.0
     topic: str = ""
+    project_name: str = ""
+    relevance_mode: str = LLM_RELEVANCE_MODE_DEFAULT
+    relevance_threshold: float = 0.0
     matched_keywords: List[str] = None
     llm_relevance_text: str = ""
     llm_core_point_text: str = ""
@@ -188,6 +271,7 @@ class DigestStats:
     duplicates_filtered: int = 0
     final_selected: int = 0
     query_strategy: str = "saved-topics"
+    relevance_policy_summary: List[str] = field(default_factory=list)
     send_frequency: str = "daily"
     lookback_hours: int = 24
     llm_max_candidates_base: int = 0
@@ -961,10 +1045,17 @@ def load_topic_configuration(
 
         name = clean_text(str(topic.get("name", "")))
         keyword_weights = coerce_keyword_weights(topic.get("keywords"))
+        relevance_mode = normalize_relevance_mode(topic.get("relevance_mode", LLM_RELEVANCE_MODE_DEFAULT))
         if not name or not keyword_weights:
             continue
 
-        profiles.append(TopicProfile(name=name, keywords=keyword_weights))
+        profiles.append(
+            TopicProfile(
+                name=name,
+                keywords=keyword_weights,
+                relevance_mode=relevance_mode,
+            )
+        )
 
     for project in projects_payload:
         if not isinstance(project, dict):
@@ -1029,11 +1120,12 @@ def score_paper(
     title: str,
     abstract: str,
     topic_profiles: List[TopicProfile],
-) -> Tuple[float, str, List[str]]:
+) -> Tuple[float, str, List[str], str]:
     combined = f"{title} {abstract}".lower()
     best_topic = ""
     best_score = 0.0
     best_keywords: List[str] = []
+    best_mode = LLM_RELEVANCE_MODE_DEFAULT
     for profile in topic_profiles:
         score = 0.0
         matched: List[str] = []
@@ -1045,7 +1137,53 @@ def score_paper(
             best_score = score
             best_topic = profile.name
             best_keywords = matched
-    return best_score, best_topic, best_keywords
+            best_mode = normalize_relevance_mode(profile.relevance_mode)
+    return best_score, best_topic, best_keywords, best_mode
+
+
+def apply_topic_metadata_to_paper(paper: Paper, config: AppConfig) -> None:
+    score, topic, matched, relevance_mode = score_paper(
+        paper.title,
+        paper.abstract,
+        config.topic_profiles,
+    )
+    paper.score = score
+    paper.topic = topic
+    paper.matched_keywords = matched
+    paper.relevance_mode = normalize_relevance_mode(relevance_mode)
+    paper.relevance_threshold = relevance_mode_threshold(
+        paper.relevance_mode,
+        config.llm_relevance_threshold,
+    )
+    project_lookup = {
+        clean_text(project.name).lower(): project.name
+        for project in config.research_projects
+        if clean_text(project.name)
+    }
+    paper.project_name = project_lookup.get(clean_text(topic).lower(), "")
+
+
+def build_relevance_policy_summary(
+    papers: List[Paper],
+    fallback_threshold: float,
+) -> List[str]:
+    counts: Dict[str, int] = {}
+    for paper in papers:
+        mode = normalize_relevance_mode(getattr(paper, "relevance_mode", LLM_RELEVANCE_MODE_DEFAULT))
+        counts[mode] = counts.get(mode, 0) + 1
+    if not counts:
+        return []
+    ordered_modes = ["strict", "balanced", "discovery"]
+    lines: List[str] = []
+    for mode in ordered_modes:
+        count = counts.get(mode, 0)
+        if count <= 0:
+            continue
+        threshold = relevance_mode_threshold(mode, fallback_threshold)
+        lines.append(
+            f"{relevance_mode_label(mode)} topic mode: pass >= {threshold:.1f} ({count} candidate{'s' if count != 1 else ''})"
+        )
+    return lines
 
 def parse_json_loose(text: str) -> Any:
     raw = (text or "").strip()
@@ -1765,16 +1903,61 @@ def prefilter_candidates_for_llm(papers: List[Paper], config: AppConfig) -> List
 
     scored: List[Paper] = []
     for paper in papers:
-        score, topic, matched = score_paper(paper.title, paper.abstract, config.topic_profiles)
-        paper.score = score
-        paper.topic = topic
-        paper.matched_keywords = matched
+        apply_topic_metadata_to_paper(paper, config)
         scored.append(paper)
 
     scored.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
     with_keywords = [item for item in scored if item.score > 0]
     candidates = with_keywords or scored
     return candidates[: max(1, config.llm_max_candidates)]
+
+
+def build_llm_scoring_prompt(
+    project_context: str,
+    project_names: List[str],
+    payload_items: List[Dict[str, Any]],
+    output_language: str,
+    relevance_mode: str,
+    min_score: float,
+) -> str:
+    policy = get_relevance_mode_policy(relevance_mode)
+    policy_lines = "\n".join(f"- {line}" for line in policy.get("prompt_lines", []))
+    return (
+        "You are a personalized research assistant.\n"
+        "Evaluate how relevant each paper is to the user's research projects.\n"
+        "Each paper includes a primary matched topic_name and that topic's relevance_mode.\n"
+        "Use the matched topic as the first lens, then map the paper to the best project_name when possible.\n"
+        "Project context:\n"
+        f"{project_context}\n\n"
+        "For each paper, do the following:\n"
+        "1) score relevance from 1 to 10\n"
+        f"2) write one short relevance reason in {output_language}\n"
+        f"3) write core-point summary in {output_language} using 3-4 short lines\n"
+        f"4) write usefulness explanation in {output_language} using 3-4 short lines\n"
+        "5) provide 1-3 evidence spans (exact short phrases copied from title/abstract)\n\n"
+        "Return ONLY JSON object:\n"
+        "{\n"
+        '  "items": [\n'
+        "    {\n"
+        '      "id": "...",\n'
+        '      "relevance_score": 1,\n'
+        '      "project_name": "...",\n'
+        '      "relevance_reason": "...",\n'
+        '      "core_point": "...",\n'
+        '      "usefulness": "...",\n'
+        '      "evidence_spans": ["...", "..."]\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        f"Scoring policy ({relevance_mode_label(relevance_mode)} mode):\n"
+        f"{policy_lines}\n"
+        "- project_name must be one of the provided project names when possible; otherwise use empty string.\n"
+        "- score must be integer 1..10\n"
+        f"- score >= {min_score:.1f} means pass for this topic mode\n"
+        "- do not hallucinate beyond title and abstract\n\n"
+        f"Allowed project names: {json.dumps(project_names, ensure_ascii=False)}\n\n"
+        f"Papers JSON:\n{json.dumps(payload_items, ensure_ascii=False)}"
+    )
 
 
 def annotate_papers_with_llm(
@@ -1788,6 +1971,7 @@ def annotate_papers_with_llm(
             "scored_count": 0,
             "pass_count": 0,
             "score_buckets": {},
+            "relevance_policy_summary": [],
         }
 
     project_context = build_project_context_text(config.research_projects)
@@ -1798,123 +1982,113 @@ def annotate_papers_with_llm(
     }
     project_names = [name for name in project_name_lookup.values()]
     by_id = {paper.paper_id: paper for paper in papers}
-    min_score = config.llm_relevance_threshold
     output_language = output_language_display_name(config.output_language)
-
-    for batch in chunk_list(papers, max(1, config.llm_batch_size)):
-        payload_items = []
-        for paper in batch:
-            payload_items.append(
-                {
-                    "id": paper.paper_id,
-                    "title": paper.title,
-                    "abstract": clean_text(paper.abstract)[:1500],
-                    "source": paper.source,
-                    "published_at_utc": paper.published_at_utc.isoformat(),
-                }
-            )
-
-        prompt = (
-            "You are a personalized research assistant.\n"
-            "Evaluate how relevant each paper is to the user's research projects.\n"
-            "Project context:\n"
-            f"{project_context}\n\n"
-            "For each paper, do the following:\n"
-            "1) score relevance from 1 to 10\n"
-            f"2) write one short relevance reason in {output_language}\n"
-            f"3) write core-point summary in {output_language} using 3-4 short lines\n"
-            f"4) write usefulness explanation in {output_language} using 3-4 short lines\n"
-            "5) provide 1-3 evidence spans (exact short phrases copied from title/abstract)\n\n"
-            "Return ONLY JSON object:\n"
-            "{\n"
-            '  "items": [\n'
-            "    {\n"
-            '      "id": "...",\n'
-            '      "relevance_score": 1,\n'
-            '      "project_name": "...",\n'
-            '      "relevance_reason": "...",\n'
-            '      "core_point": "...",\n'
-            '      "usefulness": "...",\n'
-            '      "evidence_spans": ["...", "..."]\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "Scoring policy (strict):\n"
-            "- Hard-cap A: if 2 or more of these mismatch with project context, score must be <= 5:\n"
-            "  disease/population, modality/data type, task/clinical objective.\n"
-            "- Hard-cap B: if overlap is only generic terms (e.g., 'medical AI', 'foundation model') "
-            "without concrete project fit, score must be <= 4.\n"
-            "- score >= 7 is allowed only when there is direct overlap in experiment design, dataset, "
-            "or clinical context with the user's project.\n"
-            "- 9-10 must be rare and reserved for near-direct project matches.\n"
-            "- Calibrate to avoid score inflation: unless this batch is unusually strong, most papers "
-            "should stay in the mid-range (about 3-6).\n"
-            "- project_name must be one of the provided project names when possible; otherwise use empty string.\n"
-            "- score must be integer 1..10\n"
-            f"- score >= {min_score:.1f} means pass\n"
-            "- do not hallucinate beyond title and abstract\n"
-            "- be strict to reduce noisy papers\n\n"
-            f"Allowed project names: {json.dumps(project_names, ensure_ascii=False)}\n\n"
-            f"Papers JSON:\n{json.dumps(payload_items, ensure_ascii=False)}"
+    for paper in papers:
+        paper.score = 0.0
+        paper.llm_relevance_text = ""
+        paper.llm_core_point_text = ""
+        paper.llm_usefulness_text = ""
+        paper.llm_evidence_spans = []
+        paper.relevance_mode = normalize_relevance_mode(
+            getattr(paper, "relevance_mode", LLM_RELEVANCE_MODE_DEFAULT)
         )
+        if getattr(paper, "relevance_threshold", 0.0) <= 0:
+            paper.relevance_threshold = relevance_mode_threshold(
+                paper.relevance_mode,
+                config.llm_relevance_threshold,
+            )
 
-        llm_json = call_llm_json(config, prompt, temperature=0.15)
-        raw_items = llm_json.get("items", []) if isinstance(llm_json, dict) else []
-        for item in raw_items:
-            if not isinstance(item, dict):
-                continue
-            paper_id = clean_text(str(item.get("id", "")))
-            paper = by_id.get(paper_id)
-            if not paper:
-                continue
-            try:
-                score = float(item.get("relevance_score", 0))
-            except (TypeError, ValueError):
-                score = 0.0
-            evidence_spans: List[str] = []
-            evidence_raw = item.get("evidence_spans", [])
-            if isinstance(evidence_raw, list):
-                for span in evidence_raw[:3]:
-                    text = clean_text(str(span))
-                    if text:
-                        evidence_spans.append(text[:220])
-            elif isinstance(evidence_raw, str):
-                for span in re.split(r"[\n;]+", evidence_raw):
-                    text = clean_text(span)
-                    if text:
-                        evidence_spans.append(text[:220])
-                    if len(evidence_spans) >= 3:
-                        break
-            if score >= 7.0 and not evidence_spans:
-                score = 6.0
-            paper.score = max(0.0, min(10.0, score))
-            paper.llm_relevance_text = clean_text(
-                str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
-            )
-            paper.llm_core_point_text = clean_text(
-                str(item.get("core_point", item.get("core_point_ko", "")))
-            )
-            paper.llm_usefulness_text = clean_text(
-                str(item.get("usefulness", item.get("usefulness_ko", "")))
-            )
-            paper.llm_evidence_spans = evidence_spans
-            project_name = clean_text(str(item.get("project_name", "")))
-            if project_name:
-                canonical_name = project_name_lookup.get(project_name.lower())
-                if canonical_name:
-                    paper.topic = canonical_name
+    papers_by_mode: Dict[str, List[Paper]] = {}
+    for paper in papers:
+        papers_by_mode.setdefault(paper.relevance_mode, []).append(paper)
 
-    selected = [paper for paper in papers if paper.score >= min_score]
+    for relevance_mode, mode_papers in papers_by_mode.items():
+        min_score = relevance_mode_threshold(relevance_mode, config.llm_relevance_threshold)
+        for batch in chunk_list(mode_papers, max(1, config.llm_batch_size)):
+            payload_items = []
+            for paper in batch:
+                payload_items.append(
+                    {
+                        "id": paper.paper_id,
+                        "title": paper.title,
+                        "abstract": clean_text(paper.abstract)[:1500],
+                        "source": paper.source,
+                        "published_at_utc": paper.published_at_utc.isoformat(),
+                        "topic_name": paper.topic,
+                        "topic_mode": paper.relevance_mode,
+                        "matched_keywords": (paper.matched_keywords or [])[:8],
+                    }
+                )
+
+            prompt = build_llm_scoring_prompt(
+                project_context=project_context,
+                project_names=project_names,
+                payload_items=payload_items,
+                output_language=output_language,
+                relevance_mode=relevance_mode,
+                min_score=min_score,
+            )
+            llm_json = call_llm_json(config, prompt, temperature=0.15)
+            raw_items = llm_json.get("items", []) if isinstance(llm_json, dict) else []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                paper_id = clean_text(str(item.get("id", "")))
+                paper = by_id.get(paper_id)
+                if not paper:
+                    continue
+                try:
+                    score = float(item.get("relevance_score", 0))
+                except (TypeError, ValueError):
+                    score = 0.0
+                evidence_spans: List[str] = []
+                evidence_raw = item.get("evidence_spans", [])
+                if isinstance(evidence_raw, list):
+                    for span in evidence_raw[:3]:
+                        text = clean_text(str(span))
+                        if text:
+                            evidence_spans.append(text[:220])
+                elif isinstance(evidence_raw, str):
+                    for span in re.split(r"[\n;]+", evidence_raw):
+                        text = clean_text(span)
+                        if text:
+                            evidence_spans.append(text[:220])
+                        if len(evidence_spans) >= 3:
+                            break
+                if score >= 7.0 and not evidence_spans:
+                    score = 5.5
+                paper.score = max(0.0, min(10.0, score))
+                paper.llm_relevance_text = clean_text(
+                    str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
+                )
+                paper.llm_core_point_text = clean_text(
+                    str(item.get("core_point", item.get("core_point_ko", "")))
+                )
+                paper.llm_usefulness_text = clean_text(
+                    str(item.get("usefulness", item.get("usefulness_ko", "")))
+                )
+                paper.llm_evidence_spans = evidence_spans
+                project_name = clean_text(str(item.get("project_name", "")))
+                if project_name:
+                    canonical_name = project_name_lookup.get(project_name.lower())
+                    if canonical_name:
+                        paper.project_name = canonical_name
+
+    selected = [paper for paper in papers if paper.score >= paper.relevance_threshold]
     selected.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
     scored_values = [paper.score for paper in papers]
     metadata = {
         "mode": "llm",
-        "threshold": min_score,
+        "threshold": min((paper.relevance_threshold for paper in papers), default=config.llm_relevance_threshold),
         "scoring_candidates": len(papers),
         "scored_count": len([value for value in scored_values if value > 0]),
         "pass_count": len(selected),
         "score_buckets": build_score_buckets(scored_values),
         "scored_examples": build_scored_examples(papers, limit=40),
+        "relevance_policy_summary": build_relevance_policy_summary(
+            papers,
+            config.llm_relevance_threshold,
+        ),
     }
     return selected, metadata
 
@@ -1925,12 +2099,9 @@ def rank_relevant_papers_keyword(
     scored: List[Paper] = []
     ranked: List[Paper] = []
     for paper in papers:
-        score, topic, matched = score_paper(paper.title, paper.abstract, config.topic_profiles)
-        paper.score = score
-        paper.topic = topic
-        paper.matched_keywords = matched
+        apply_topic_metadata_to_paper(paper, config)
         scored.append(paper)
-        if score < config.min_relevance_score:
+        if paper.score < config.min_relevance_score:
             continue
         ranked.append(paper)
     ranked.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
@@ -1943,6 +2114,10 @@ def rank_relevant_papers_keyword(
         "pass_count": len(ranked),
         "score_buckets": build_score_buckets(scored_values),
         "scored_examples": build_scored_examples(scored, limit=40),
+        "relevance_policy_summary": build_relevance_policy_summary(
+            scored,
+            config.llm_relevance_threshold,
+        ),
     }
     return ranked, metadata
 
@@ -1960,6 +2135,7 @@ def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[P
                 "scored_count": 0,
                 "pass_count": 0,
                 "score_buckets": {},
+                "relevance_policy_summary": [],
             },
         )
     if config.enable_llm_agent and has_llm_provider(config):
@@ -2037,6 +2213,8 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         lines.append("LLM ranking: enabled")
     if stats.ranking_threshold > 0:
         lines.append(f"Relevance threshold: {stats.ranking_threshold:.1f}")
+    if stats.relevance_policy_summary:
+        lines.extend("Relevance policy: " + line for line in stats.relevance_policy_summary)
     if stats.scoring_candidates > 0:
         lines.append(f"Scoring candidates: {stats.scoring_candidates}")
     if stats.scored_count > 0:
@@ -2255,6 +2433,12 @@ def compose_email_html(
         source_label, source_fg, source_bg = source_badge_style(paper.source)
         authors_text = html.escape(format_authors(paper.authors))
         published_local = html.escape(format_local_time(paper.published_at_utc, timezone_name))
+        topic_label = html.escape(paper.topic or "N/A")
+        project_label = html.escape(paper.project_name or "N/A")
+        mode_text = relevance_mode_label(paper.relevance_mode)
+        if paper.relevance_threshold > 0:
+            mode_text = f"{mode_text} >= {paper.relevance_threshold:.1f}"
+        mode_label = html.escape(mode_text)
 
         relevance_text = escape_multiline(paper.llm_relevance_text or ui["fallback_relevance"])
         core_text = escape_multiline(paper.llm_core_point_text or ui["fallback_core"])
@@ -2289,6 +2473,17 @@ def compose_email_html(
               </div>
               <div style="margin-top:8px;font-size:12px;line-height:1.55;color:#8a8a8a;">
                 {authors_text}<br/>Published {published_local}
+              </div>
+              <div style="margin-top:10px;font-size:12px;line-height:1.5;color:#475569;">
+                <span style="display:inline-block;margin:0 8px 6px 0;padding:4px 8px;border-radius:999px;background:#eef5ef;color:#2d5a3d;">
+                  {html.escape(ui["topic"])}: {topic_label}
+                </span>
+                <span style="display:inline-block;margin:0 8px 6px 0;padding:4px 8px;border-radius:999px;background:#f3f4f6;color:#475569;">
+                  {html.escape(ui["project"])}: {project_label}
+                </span>
+                <span style="display:inline-block;margin:0 8px 6px 0;padding:4px 8px;border-radius:999px;background:#f8f6f2;color:#8a7d5a;">
+                  {html.escape(ui["mode"])}: {mode_label}
+                </span>
               </div>
               <div style="margin-top:10px;">{keywords_html}</div>
 
@@ -2416,7 +2611,14 @@ def compose_email_text(
     for idx, paper in enumerate(papers, start=1):
         lines.append(f"#{idx} [{paper.source}] {paper.title}")
         lines.append(f"URL: {paper.url}")
-        lines.append(f"Score: {paper.score:.1f}/10 | Topic: {paper.topic or 'N/A'}")
+        mode_text = relevance_mode_label(paper.relevance_mode)
+        if paper.relevance_threshold > 0:
+            mode_text = f"{mode_text} (>= {paper.relevance_threshold:.1f})"
+        lines.append(
+            "Score: "
+            f"{paper.score:.1f}/10 | Topic: {paper.topic or 'N/A'} | "
+            f"Project: {paper.project_name or 'N/A'} | Mode: {mode_text}"
+        )
         lines.append(f"Published: {format_local_time(paper.published_at_utc, timezone_name)}")
         lines.append(f"Authors: {format_authors(paper.authors)}")
         lines.append("Matched keywords: " + (", ".join((paper.matched_keywords or [])[:10]) or "N/A"))
@@ -2709,6 +2911,11 @@ def collect_and_rank_papers(
     scored_examples = rank_meta.get("scored_examples", [])
     if isinstance(scored_examples, list):
         stats.scored_examples = [clean_text(str(item)) for item in scored_examples if clean_text(str(item))]
+    relevance_policy_summary = rank_meta.get("relevance_policy_summary", [])
+    if isinstance(relevance_policy_summary, list):
+        stats.relevance_policy_summary = [
+            clean_text(str(item)) for item in relevance_policy_summary if clean_text(str(item))
+        ]
     stats.llm_fallback_reason = clean_text(str(rank_meta.get("llm_fallback_reason", "")))
     if "llm_score_buckets" in rank_meta and isinstance(rank_meta.get("llm_score_buckets"), dict):
         stats.llm_fallback_score_buckets = {
@@ -2804,6 +3011,10 @@ def run_digest(
                 "source": paper.source,
                 "score": paper.score,
                 "url": paper.url,
+                "topic": paper.topic,
+                "project_name": paper.project_name,
+                "relevance_mode": paper.relevance_mode,
+                "relevance_threshold": paper.relevance_threshold,
                 "published_at_utc": paper.published_at_utc.isoformat() if paper.published_at_utc else "",
                 "authors": paper.authors,
                 "summary_relevance": paper.llm_relevance_text,
@@ -2970,6 +3181,9 @@ def email_ui_labels(output_language: str) -> Dict[str, str]:
             "key": "Key finding",
             "how": "How you can use this",
             "abstract": "Abstract preview",
+            "topic": "Topic",
+            "project": "Project",
+            "mode": "Mode",
             "fallback_relevance": "No LLM relevance reason generated.",
             "fallback_core": "No core-point summary generated.",
             "fallback_useful": "No usefulness summary generated.",
@@ -2980,6 +3194,9 @@ def email_ui_labels(output_language: str) -> Dict[str, str]:
             "key": "핵심 포인트",
             "how": "활용 방법",
             "abstract": "초록 미리보기",
+            "topic": "주제",
+            "project": "프로젝트",
+            "mode": "모드",
             "fallback_relevance": "LLM 관련성 설명이 생성되지 않았습니다.",
             "fallback_core": "핵심 요약이 생성되지 않았습니다.",
             "fallback_useful": "활용성 설명이 생성되지 않았습니다.",
@@ -2990,6 +3207,9 @@ def email_ui_labels(output_language: str) -> Dict[str, str]:
             "key": "主要な発見",
             "how": "活用方法",
             "abstract": "要旨プレビュー",
+            "topic": "トピック",
+            "project": "プロジェクト",
+            "mode": "モード",
             "fallback_relevance": "LLMによる関連性説明が生成されませんでした。",
             "fallback_core": "コア要約が生成されませんでした。",
             "fallback_useful": "活用性の説明が生成されませんでした。",
@@ -3000,6 +3220,9 @@ def email_ui_labels(output_language: str) -> Dict[str, str]:
             "key": "Hallazgo clave",
             "how": "Cómo puedes usarlo",
             "abstract": "Vista previa del resumen",
+            "topic": "Tema",
+            "project": "Proyecto",
+            "mode": "Modo",
             "fallback_relevance": "No se generó la razón de relevancia por LLM.",
             "fallback_core": "No se generó el resumen del punto clave.",
             "fallback_useful": "No se generó la explicación de utilidad.",
@@ -3010,6 +3233,9 @@ def email_ui_labels(output_language: str) -> Dict[str, str]:
             "key": "Résultat clé",
             "how": "Comment l'utiliser",
             "abstract": "Aperçu du résumé",
+            "topic": "Sujet",
+            "project": "Projet",
+            "mode": "Mode",
             "fallback_relevance": "Aucune justification de pertinence LLM générée.",
             "fallback_core": "Aucun résumé du point clé généré.",
             "fallback_useful": "Aucune explication d'utilité générée.",
@@ -3106,7 +3332,7 @@ def apply_project_cadence_filter(
     filtered_out = 0
     unmatched_topic_labels = 0
     for paper in papers:
-        topic_key = clean_text(paper.topic).lower()
+        topic_key = clean_text(paper.project_name or paper.topic).lower()
         if not topic_key:
             filtered.append(paper)
             continue
@@ -3240,9 +3466,9 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     output_language = normalize_output_language(os.getenv("OUTPUT_LANGUAGE", "en"))
     gemini_max_papers = max(1, read_int_env("GEMINI_MAX_PAPERS", 5))
     llm_relevance_threshold = normalize_relevance_score(
-        read_float_env("LLM_RELEVANCE_THRESHOLD", 7.0),
+        read_float_env("LLM_RELEVANCE_THRESHOLD", 6.0),
         "LLM_RELEVANCE_THRESHOLD",
-        7.0,
+        6.0,
     )
     llm_batch_size = max(1, read_int_env("LLM_BATCH_SIZE", 5))
     llm_max_candidates_base = min(80, max(1, read_int_env("LLM_MAX_CANDIDATES", 30)))
