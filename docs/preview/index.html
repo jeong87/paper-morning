@@ -718,6 +718,9 @@
             <select id="model">
               <option value="gemini-3.1-pro">gemini-3.1-pro</option>
               <option value="gemini-3.1-flash" selected>gemini-3.1-flash</option>
+              <option value="gemini-3.0-pro">gemini-3.0-pro</option>
+              <option value="gemini-3.0-flash">gemini-3.0-flash</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro</option>
               <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             </select>
           </div>
@@ -750,7 +753,7 @@
           </li>
           <li data-step="2">
             <strong>Retrieve recent candidates</strong>
-            It pulls live recent papers from arXiv and PubMed inside a fixed first-run window.
+            It starts with the last 7 days, then widens the live search window step by step up to 6 months if needed.
           </li>
           <li data-step="3">
             <strong>Rank the candidates with Gemini</strong>
@@ -764,7 +767,7 @@
 
         <div class="scope-box">
           <strong>Preview scope</strong>
-          <p>Fixed for a fast first impression: 5 selected papers, last 168 hours, real retrieval from arXiv and PubMed, no email send.</p>
+          <p>Fast but adaptive: 5 selected papers, real retrieval from arXiv and PubMed, search window starts at 7 days and expands up to 180 days, no email send.</p>
         </div>
 
         <p class="foot-note">
@@ -776,11 +779,26 @@
   </div>
 
   <script>
-    const FIXED_LOOKBACK_HOURS = 168;
+    const LOOKBACK_STEPS = [
+      { hours: 24 * 7, label: "last 7 days" },
+      { hours: 24 * 14, label: "last 14 days" },
+      { hours: 24 * 30, label: "last 30 days" },
+      { hours: 24 * 60, label: "last 60 days" },
+      { hours: 24 * 90, label: "last 90 days" },
+      { hours: 24 * 180, label: "last 180 days" },
+    ];
+    const MAX_LOOKBACK_HOURS = LOOKBACK_STEPS[LOOKBACK_STEPS.length - 1].hours;
     const FIXED_PAPER_COUNT = 5;
     const LLM_MIN_SCORE = 6.0;
-    const MODEL_FALLBACK_ORDER = ["gemini-3.1-pro", "gemini-3.1-flash", "gemini-2.5-flash"];
-    const storageKey = "pm_live_preview_last_html_v3";
+    const MODEL_FALLBACK_ORDER = [
+      "gemini-3.1-pro",
+      "gemini-3.1-flash",
+      "gemini-3.0-pro",
+      "gemini-3.0-flash",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+    ];
+    const storageKey = "pm_live_preview_last_html_v4";
     const runBtn = document.getElementById("runBtn");
     const openLastBtn = document.getElementById("openLastBtn");
     const statusEl = document.getElementById("status");
@@ -874,6 +892,41 @@
       return unique([preferredModel, ...MODEL_FALLBACK_ORDER]);
     }
 
+    function lookbackLabel(hours) {
+      const match = LOOKBACK_STEPS.find((step) => step.hours === hours);
+      if (match) return match.label;
+      const days = Math.round(hours / 24);
+      return `last ${days} days`;
+    }
+
+    function classifyGeminiFailure(status, bodyText) {
+      const lowered = String(bodyText || "").toLowerCase();
+      if (
+        status === 429 ||
+        lowered.includes("resource_exhausted") ||
+        lowered.includes("quota") ||
+        lowered.includes("rate limit")
+      ) {
+        return "quota";
+      }
+      if (
+        [400, 404].includes(status) &&
+        (
+          lowered.includes("not found") ||
+          lowered.includes("not exist") ||
+          lowered.includes("unsupported") ||
+          lowered.includes("unknown model") ||
+          lowered.includes("not available")
+        )
+      ) {
+        return "unsupported";
+      }
+      if ([500, 502, 503, 504].includes(status)) {
+        return "retryable";
+      }
+      return "fatal";
+    }
+
     async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -905,6 +958,7 @@
     async function callGeminiJson(prompt, apiKey, preferredModel) {
       const models = getModelFallbackChain(preferredModel);
       let lastError = null;
+      const attempts = [];
 
       for (const modelName of models) {
         try {
@@ -928,8 +982,15 @@
 
           if (!response.ok) {
             const text = await response.text();
+            const kind = classifyGeminiFailure(response.status, text);
+            attempts.push({
+              modelName,
+              status: response.status,
+              kind,
+              snippet: text.slice(0, 220),
+            });
             lastError = new Error(`Gemini ${modelName} failed (${response.status}): ${text.slice(0, 220)}`);
-            if ([404, 429, 500, 503].includes(response.status)) {
+            if (kind !== "fatal") {
               continue;
             }
             throw lastError;
@@ -941,15 +1002,44 @@
             .join("\n");
           const parsed = extractJsonBlock(text);
           if (!parsed) {
+            attempts.push({
+              modelName,
+              status: 200,
+              kind: "non_json",
+              snippet: "Gemini returned non-JSON output.",
+            });
             lastError = new Error(`Gemini ${modelName} returned non-JSON output.`);
             continue;
           }
           return { parsed, usedModel: modelName };
         } catch (error) {
+          if (!attempts.some((attempt) => attempt.modelName === modelName)) {
+            attempts.push({
+              modelName,
+              status: 0,
+              kind: "network",
+              snippet: String(error && error.message ? error.message : error).slice(0, 220),
+            });
+          }
           lastError = error;
         }
       }
 
+      const usableAttempts = attempts.filter((attempt) => attempt.kind !== "unsupported");
+      const allQuota = usableAttempts.length > 0 && usableAttempts.every((attempt) => attempt.kind === "quota");
+      if (allQuota) {
+        const tried = attempts.map((attempt) => attempt.modelName).join(", ");
+        throw new Error(
+          `Gemini quota appears exhausted across all fallback models tried: ${tried}. Try again later or use another API key.`
+        );
+      }
+
+      const summary = attempts
+        .map((attempt) => `${attempt.modelName}: ${attempt.kind}${attempt.status ? ` (${attempt.status})` : ""}`)
+        .join("; ");
+      if (summary) {
+        throw new Error(`All Gemini model attempts failed. ${summary}`);
+      }
       throw lastError || new Error("All Gemini model attempts failed.");
     }
 
@@ -1007,13 +1097,15 @@ Return ONLY JSON object with schema:
 }
 Rules:
 - create exactly one topic for this project
-- keyword list length: 6..12
-- arXiv query must use all: terms
-- PubMed query should use boolean and quoted phrases where useful
+- keyword list length: 5..8
+- live preview needs retrievable recent papers, so balance precision with enough recall
+- keep arXiv and PubMed queries moderately broad and centered on 2-4 core concepts
+- arXiv query should use all: terms, but avoid long chains of narrow requirements
+- PubMed query should use boolean and quoted phrases where useful, but avoid overly specific filters
 - avoid over-constrained MeSH-only PubMed queries
 - Semantic Scholar query should be concise plain text
 - Google Scholar query should be concise plain text
-- prioritize precision over recall
+- if the project is niche, prefer one domain term plus one method/task term rather than stacking every detail
 - keep response machine-parseable JSON only
 
 Project JSON:
@@ -1074,7 +1166,7 @@ ${JSON.stringify(project)}`;
     }
 
     async function fetchArxivCandidates(arxivQuery) {
-      const rawUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery)}&start=0&max_results=35&sortBy=submittedDate&sortOrder=descending`;
+      const rawUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery)}&start=0&max_results=60&sortBy=submittedDate&sortOrder=descending`;
       const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(rawUrl)}`;
       return parseArxivXml(await fetchText(proxyUrl, 35000));
     }
@@ -1099,10 +1191,10 @@ ${JSON.stringify(project)}`;
     }
 
     async function fetchPubMedCandidates(pubmedQuery) {
-      const query = `(${pubmedQuery}) AND ("last 7 days"[dp])`;
-      const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax=40&term=${encodeURIComponent(query)}`;
+      const query = `(${pubmedQuery})`;
+      const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax=80&term=${encodeURIComponent(query)}`;
       const searchData = await fetchJson(esearchUrl, 30000);
-      const idList = (searchData?.esearchresult?.idlist || []).slice(0, 40);
+      const idList = (searchData?.esearchresult?.idlist || []).slice(0, 80);
       if (!idList.length) return [];
       const idsCsv = idList.join(",");
       const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=${encodeURIComponent(idsCsv)}`;
@@ -1127,6 +1219,89 @@ ${JSON.stringify(project)}`;
           };
         })
         .filter(Boolean);
+    }
+
+    function buildSearchPlans(input, topic) {
+      const plans = [{
+        label: "generated query",
+        arxivQuery: String(topic?.arxiv_query || "").trim(),
+        pubmedQuery: String(topic?.pubmed_query || "").trim(),
+      }];
+      const heuristicTerms = buildHeuristicTerms(input.projectName, input.projectContext, input.keywords);
+      const broadPlan = {
+        label: "broader fallback query",
+        arxivQuery: buildFallbackQuery("arxiv", heuristicTerms),
+        pubmedQuery: buildFallbackQuery("pubmed", heuristicTerms),
+      };
+      if (
+        broadPlan.arxivQuery &&
+        broadPlan.pubmedQuery &&
+        (
+          broadPlan.arxivQuery !== plans[0].arxivQuery ||
+          broadPlan.pubmedQuery !== plans[0].pubmedQuery
+        )
+      ) {
+        plans.push(broadPlan);
+      }
+      return plans;
+    }
+
+    async function fetchCandidatesForPlan(plan, diagnostics) {
+      const [arxivResult, pubmedResult] = await Promise.allSettled([
+        fetchArxivCandidates(plan.arxivQuery),
+        fetchPubMedCandidates(plan.pubmedQuery),
+      ]);
+
+      const arxivCandidates = arxivResult.status === "fulfilled" ? arxivResult.value : [];
+      const pubmedCandidates = pubmedResult.status === "fulfilled" ? pubmedResult.value : [];
+      if (arxivResult.status !== "fulfilled") diagnostics.push(`arXiv fetch warning (${plan.label}): ${String(arxivResult.reason?.message || arxivResult.reason)}`);
+      if (pubmedResult.status !== "fulfilled") diagnostics.push(`PubMed fetch warning (${plan.label}): ${String(pubmedResult.reason?.message || pubmedResult.reason)}`);
+      diagnostics.push(`Search plan used: ${plan.label}`);
+      diagnostics.push(`arXiv query: ${plan.arxivQuery || "N/A"}`);
+      diagnostics.push(`PubMed query: ${plan.pubmedQuery || "N/A"}`);
+
+      const combined = dedupeCandidates([...arxivCandidates, ...pubmedCandidates]);
+      diagnostics.push(`Retrieved candidates (${plan.label}): arXiv ${arxivCandidates.length}, PubMed ${pubmedCandidates.length}, total ${combined.length}`);
+      return {
+        arxivCandidates,
+        pubmedCandidates,
+        allCandidates: combined,
+      };
+    }
+
+    async function retrieveCandidatesWithAdaptiveLookback(input, topic, diagnostics) {
+      const plans = buildSearchPlans(input, topic);
+      let lastAttempt = null;
+
+      for (const plan of plans) {
+        const attempt = await fetchCandidatesForPlan(plan, diagnostics);
+        lastAttempt = { ...attempt, plan };
+        if (!attempt.allCandidates.length) {
+          diagnostics.push(`No candidates returned for ${plan.label}.`);
+          continue;
+        }
+        for (const step of LOOKBACK_STEPS) {
+          const filtered = filterByLookback(attempt.allCandidates, step.hours);
+          diagnostics.push(`Candidates inside ${lookbackLabel(step.hours)} (${plan.label}): ${filtered.length}`);
+          if (filtered.length) {
+            return {
+              ...attempt,
+              plan,
+              candidates: filtered,
+              lookbackHours: step.hours,
+              noRecentWithinMax: false,
+            };
+          }
+        }
+        diagnostics.push(`No candidates from ${plan.label} remained inside the last 180 days.`);
+      }
+
+      return {
+        ...(lastAttempt || { arxivCandidates: [], pubmedCandidates: [], allCandidates: [], plan: plans[0] || null }),
+        candidates: [],
+        lookbackHours: MAX_LOOKBACK_HOURS,
+        noRecentWithinMax: Boolean(lastAttempt && lastAttempt.allCandidates.length),
+      };
     }
 
     function filterByLookback(candidates, lookbackHours) {
@@ -1313,9 +1488,14 @@ ${JSON.stringify(compact)}`;
       const topScore = papers.reduce((max, paper) => Math.max(max, Number(paper.score || 0)), 0);
       const sources = [...new Set(papers.map((paper) => paper.source || "Unknown"))].join(" | ") || "N/A";
       const topic = payload?.topic || {};
+      const notice = String(payload?.notice || "").trim();
+      const noResultsMessage = String(payload?.noResultsMessage || "").trim();
       const keywordChips = renderPills(topic.keywords || [], "pm-keyword-chip");
       const diagnosticsHtml = diagnostics.length
         ? `<div class="pm-diagnostics">${diagnostics.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>`
+        : "";
+      const noticeHtml = notice
+        ? `<div class="pm-callout pm-callout-use" style="margin-top:14px;"><strong>Preview note</strong><p>${escapeHtml(notice)}</p></div>`
         : "";
 
       const cards = papers.map((paper, index) => {
@@ -1454,7 +1634,7 @@ ${JSON.stringify(compact)}`;
         <p>Live preview generated in browser. This is the digest-style HTML only; no email was sent.</p>
         <div class="pm-meta">
           <div><span>Project</span><strong>${escapeHtml(meta.projectName)}</strong></div>
-          <div><span>Window</span><strong>${escapeHtml(payload.window || `Last ${FIXED_LOOKBACK_HOURS}h`)}</strong></div>
+          <div><span>Window</span><strong>${escapeHtml(payload.window || lookbackLabel(MAX_LOOKBACK_HOURS))}</strong></div>
           <div><span>Sources</span><strong>${escapeHtml(sources)}</strong></div>
           <div><span>Gemini model</span><strong>${escapeHtml(meta.usedModel || meta.model)}</strong></div>
         </div>
@@ -1471,10 +1651,11 @@ ${JSON.stringify(compact)}`;
           <p><strong>arXiv query:</strong> ${escapeHtml(topic.arxiv_query || "N/A")}</p>
           <p><strong>PubMed query:</strong> ${escapeHtml(topic.pubmed_query || "N/A")}</p>
         </div>
+        ${noticeHtml}
         ${diagnosticsHtml}
       </div>
       <div class="pm-body">
-        ${cards || '<div class="pm-paper-card"><h2>No papers generated</h2><p class="pm-paper-authors">Try a more specific context or keywords.</p></div>'}
+        ${cards || `<div class="pm-paper-card"><h2>No recent relevant papers found</h2><p class="pm-paper-authors">${escapeHtml(noResultsMessage || "Try a different context, broader keywords, or a less niche framing.")}</p></div>`}
       </div>
       <div class="pm-footer">
         Preview generated in browser only. Project: ${escapeHtml(meta.projectName)} | Output language: ${escapeHtml(meta.outputLang)} | No email sent.
@@ -1534,28 +1715,30 @@ ${JSON.stringify(compact)}`;
         diagnostics.push(`Topic name: ${topic.name}`);
         diagnostics.push(`Keywords: ${topic.keywords.join(", ")}`);
 
-        setStatus("Retrieving recent candidates from arXiv and PubMed...");
-        const [arxivResult, pubmedResult] = await Promise.allSettled([
-          fetchArxivCandidates(topic.arxiv_query),
-          fetchPubMedCandidates(topic.pubmed_query),
-        ]);
-
-        const arxivCandidates = arxivResult.status === "fulfilled" ? arxivResult.value : [];
-        const pubmedCandidates = pubmedResult.status === "fulfilled" ? pubmedResult.value : [];
-        if (arxivResult.status !== "fulfilled") diagnostics.push(`arXiv fetch warning: ${String(arxivResult.reason?.message || arxivResult.reason)}`);
-        if (pubmedResult.status !== "fulfilled") diagnostics.push(`PubMed fetch warning: ${String(pubmedResult.reason?.message || pubmedResult.reason)}`);
-
-        const allCandidates = dedupeCandidates([...arxivCandidates, ...pubmedCandidates]);
-        const scannedTotal = allCandidates.length;
-        let filteredCandidates = filterByLookback(allCandidates, FIXED_LOOKBACK_HOURS);
-        diagnostics.push(`Retrieved candidates: arXiv ${arxivCandidates.length}, PubMed ${pubmedCandidates.length}, total ${scannedTotal}`);
-        diagnostics.push(`Candidates inside ${FIXED_LOOKBACK_HOURS}h window: ${filteredCandidates.length}`);
-        if (!filteredCandidates.length && scannedTotal > 0) {
-          diagnostics.push("No candidates remained after the time filter, so the freshest retrieved candidates were used instead.");
-          filteredCandidates = allCandidates.slice(0, 20);
-        }
+        setStatus("Retrieving live candidates from arXiv and PubMed with adaptive lookback...");
+        const retrieval = await retrieveCandidatesWithAdaptiveLookback(input, topic, diagnostics);
+        const scannedTotal = retrieval.allCandidates.length;
+        const filteredCandidates = retrieval.candidates.slice(0, 30);
+        diagnostics.push(`Selected live preview window: ${lookbackLabel(retrieval.lookbackHours)}`);
         if (!filteredCandidates.length) {
-          throw new Error("No candidates were retrieved. Try a more specific context or a different keyword mix.");
+          const payload = {
+            window: toIsoWindow(retrieval.lookbackHours),
+            scanned: scannedTotal,
+            diagnostics,
+            topic,
+            papers: [],
+            notice: "The preview widened the search window step by step, but still could not find recent papers to show.",
+            noResultsMessage: retrieval.noRecentWithinMax
+              ? "No relevant papers were found within the last 6 months for this context. Try a broader or differently phrased project description."
+              : "No live candidates were retrieved for this context. Try broader keywords or a different project framing.",
+          };
+          const html = renderPreviewHtml(payload, { ...input, usedModel: topicResult.usedModel });
+          localStorage.setItem(storageKey, html);
+          previewWindow.document.open();
+          previewWindow.document.write(html);
+          previewWindow.document.close();
+          setStatus(payload.noResultsMessage, true);
+          return;
         }
 
         setStatus("Ranking and summarizing the retrieved candidates with Gemini...");
@@ -1564,10 +1747,11 @@ ${JSON.stringify(compact)}`;
         diagnostics.push(`Final selected papers: ${scoring.papers.length}`);
 
         const payload = {
-          window: toIsoWindow(FIXED_LOOKBACK_HOURS),
+          window: toIsoWindow(retrieval.lookbackHours),
           scanned: scannedTotal,
           diagnostics,
           topic,
+          notice: `Live preview searched ${lookbackLabel(retrieval.lookbackHours)} before finding usable recent candidates.`,
           papers: scoring.papers.map((paper) => ({
             title: paper.title,
             authors: paper.authors,
@@ -1587,7 +1771,7 @@ ${JSON.stringify(compact)}`;
         previewWindow.document.write(html);
         previewWindow.document.close();
 
-        setStatus(`Preview generated.\nTopic: ${topic.name}\nScanned: ${scannedTotal}, selected: ${payload.papers.length}\nGemini ranking model: ${scoring.usedModel}`);
+        setStatus(`Preview generated.\nTopic: ${topic.name}\nWindow: ${lookbackLabel(retrieval.lookbackHours)}\nScanned: ${scannedTotal}, selected: ${payload.papers.length}\nGemini ranking model: ${scoring.usedModel}`);
       } catch (error) {
         try {
           previewWindow.close();

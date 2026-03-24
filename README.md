@@ -11,18 +11,16 @@ It fetches recent papers, ranks relevance with LLM + project context, and delive
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
-## Template sample
-<a href="https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html">Open Template sample</a>
-
 ## Try Live Web Preview (No Download)
 If you want to understand the product from GitHub first:
 
 - <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index.html">Open Live Web Preview</a>
 
 What happens on that page:
+- The page itself explains what Paper Morning does before you run anything
 - Enter your research context and Gemini API key
 - The page generates search queries from your context
-- It retrieves real recent candidates from arXiv and PubMed
+- It retrieves real recent candidates from arXiv and PubMed, starting from the last 7 days and widening up to 6 months if needed
 - It ranks and summarizes them with Gemini
 - It opens the email-style HTML preview in a new browser tab
 
@@ -44,7 +42,7 @@ Notes:
 - Configurable cadence: `daily`, `every_3_days`, `weekly`.
 - Duplicate suppression with history tracking (`sent_ids.json`).
 - PubMed 429 retry/backoff handling.
-- Gemini with automatic fallback (`3.1-pro` -> `3.1-flash` -> `2.5-flash`) and optional Cerebras backup.
+- Gemini with automatic fallback (`3.1-pro` -> `3.1-flash` -> `3.0-pro` -> `3.0-flash` -> `2.5-pro` -> `2.5-flash`) and optional Cerebras backup.
 - Output language control via `.env`:
   - `OUTPUT_LANGUAGE=en|ko|ja|es|...`
 
@@ -148,7 +146,7 @@ Fallback (advanced):
 ## Troubleshooting (Quick)
 - `Search query is empty`: generate and save topics/queries in Topic Editor.
 - `PubMed 429`: retries are automatic, but adding `NCBI_API_KEY` is recommended.
-- `Gemini model 404`: use a supported model (`gemini-3.1-pro` or `gemini-3.1-flash`).
+- `Gemini model 404 / quota`: the live preview now retries multiple Gemini fallbacks automatically before surfacing an error.
 - No email received: check sender/recipient addresses, spam folder, and auth config.
 
 ## Delivery Priority
