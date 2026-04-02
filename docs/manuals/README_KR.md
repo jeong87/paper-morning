@@ -1,143 +1,94 @@
-﻿# Paper Morning
+# Paper Morning
 
-![Paper Morning Logo](../../assets/paper-morning-logo.png)
+[![Paper Morning Logo](../../assets/papermorning2.png)](https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index_ko.html)
 
-**Paper Morning**은 의료/AI 연구자를 위한 연구 맥락 기반 논문 검색 도구입니다.  
-프로젝트 맥락을 넣어두면, 필요할 때 즉시 관련 논문을 찾고 이유까지 설명해줍니다. 로컬 인박스, 아침 팝업, 이메일 발송은 선택 기능으로 남아 있습니다.
+**[EN](../../README.md) | [KR](README_KR.md)**
 
-- 최신 기준 버전: **[v0.7.0](../../VERSION)**
-- 라이선스: `GNU AGPLv3` (`LICENSE`)
-- 개인정보/외부 전송 정책: `PRIVACY.md`
+Paper Morning은 의료/헬스케어 AI 연구자를 위한 연구 맥락 기반 논문 검색 도구입니다.  
+프로젝트 설명을 넣으면 검색식을 만들고, 실제 논문 후보를 가져온 뒤, 어떤 논문이 왜 맞는지까지 정리해줍니다.  
+로컬 인박스, 아침 팝업, 이메일 발송은 모두 선택 기능으로 남아 있습니다.
 
-## 한 줄 요약
-- 내가 정의한 연구 프로젝트 기준으로 논문을 즉시 탐색
-- LLM(Gemini, 필요 시 Cerebras 폴백)으로 관련성 평가 + 다국어 요약(`OUTPUT_LANGUAGE`)
-- 로컬 인박스 / 아침 팝업 / 이메일 발송(선택)
-- GitHub Actions 모드로 PC를 꺼도 자동 발송 가능
+- 최신 버전: **[v0.7.0](../../VERSION)**
+- 라이선스: `GNU AGPLv3` ([LICENSE](../../LICENSE))
+- 개인정보/외부 전송 정책: [PRIVACY.md](../../PRIVACY.md)
 
-## 처음 사용자라면 여기부터
-- [초보자용 단계별 가이드](./MANUAL_FIRSTTIME_KR.md)
-- [운영/고급 설정 포함 전체 매뉴얼](./MANUAL_KR.md)
+## 라이브 웹 프리뷰
+GitHub에서 제품이 무엇을 하는지 먼저 확인하고 싶다면:
 
-## 어떤 흐름으로 동작하나요?
-1. Topic Editor에서 프로젝트와 쿼리를 저장합니다.
-2. 소스(arXiv, PubMed, Semantic Scholar, Google Scholar-SerpAPI)에서 논문을 수집합니다.
-3. LLM이 1~10점 관련성 점수를 매깁니다.
-4. 결과를 로컬 인박스에서 확인하고, 원하면 나중에 메일로도 전송합니다.
+- <a href="https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index_ko.html">한글 라이브 웹 프리뷰 열기</a>
+
+이 페이지에서 일어나는 일:
+- 연구 컨텍스트와 Gemini API key를 입력합니다.
+- Paper Morning이 컨텍스트에서 검색식을 생성합니다.
+- arXiv와 PubMed에서 실제 후보 논문을 가져옵니다.
+- Gemini가 후보를 같은 기준으로 다시 평가하고 요약합니다.
+- 결과를 새 브라우저 탭 HTML로 보여줍니다.
+
+참고:
+- 브라우저 안에서만 동작합니다.
+- 이 페이지에서는 실제 이메일을 보내지 않습니다.
+- 설치 전에 제품 가치를 확인하기 위한 첫 인상용 진입점입니다.
+
+## 이 도구가 하는 일
+1. 프로젝트 맥락에서 검색 의도를 파악합니다.
+2. arXiv, PubMed, Semantic Scholar, 선택적으로 Google Scholar(SerpAPI)에서 논문을 수집합니다.
+3. LLM이 실사용 관점에서 관련성을 다시 평가합니다.
+4. 사용자는 필요할 때 결과를 보고, 원하면 나중에 자동화나 이메일까지 켤 수 있습니다.
 
 ## 주요 기능
+- `최신 동향 / 정확도 우선 / 탐색 확장` 검색 모드
+- `7일 ~ 5년` 기간 선택
 - 프로젝트 맥락 기반 LLM relevance ranking
-- 관련도 점수 분포/통과 건수 진단 리포트
-- 중복 발송 방지(`sent_ids.json`)
-- PubMed 429 자동 재시도/백오프
-- Google Scholar(SerpAPI) 선택 연동
-- 발송 주기 옵션
-  - `daily`
-  - `every_3_days`
-  - `weekly`
-- 3일/주간 주기에서는 LLM 후보 상한(`LLM_MAX_CANDIDATES`)을 비선형 확장
+- 로컬 인박스 기본 경로
+- 실행 중인 PC에서 아침 팝업 자동 열기
+- 이메일 발송은 선택 기능
+- Gemini 자동 폴백
+  - `3.1-pro -> 3.1-flash -> 3.0-pro -> 3.0-flash -> 2.5-pro -> 2.5-flash`
+- `OUTPUT_LANGUAGE=en|ko|ja|es|...` 지원
 
-## 빠른 시작 (로컬 UI)
+## 추천 시작 경로
+가장 먼저 확인할 것은 “내 연구 주제에 맞는 논문이 잘 잡히는가”입니다.
+
 1. 의존성 설치
 
 ```bash
 pip install -r deps/requirements.txt
 ```
 
-2. 웹 콘솔 실행
+2. 로컬 런처 실행
 
 ```bash
-python app/web_app.py --host 127.0.0.1 --port 5050
+python app/local_ui_launcher.py
 ```
 
-또는
+3. 첫 실행이면 브라우저에서 setup 화면이 자동으로 열립니다.
+4. 프로젝트 설명과 Gemini key를 입력한 뒤 `Save and Search Now`를 누릅니다.
+5. 이후부터는 홈에서 버튼 한 번으로 최신 검색 결과를 열 수 있습니다.
 
-- Windows: `tools/start_web_console.bat`
-- Linux/macOS: `./tools/start_web_console.sh`
+`로컬 인박스`는 메일 대신 검색 결과 HTML/JSON을 내 PC에 저장하고 브라우저에서 다시 여는 방식입니다.
 
-3. 브라우저에서 접속
+## 자동화와 발송은 나중에
+검색 품질이 만족스러운지 먼저 확인한 뒤에만 아래 옵션을 켜는 편이 좋습니다.
 
-```text
-http://127.0.0.1:5050
-```
+- 로컬 아침 팝업
+- Gmail OAuth
+- Gmail 앱 비밀번호
+- GitHub Actions 자동화
 
-4. Setup Wizard / Settings에서 키 입력 후 Topic Editor에서 쿼리 저장
+## 인증 옵션 우선순위
+1. `로컬 인박스`
+2. `Gmail OAuth`
+3. `Gmail 앱 비밀번호`
 
-## GitHub Actions 모드 (권장)
-로컬 PC를 24시간 켜두기 어렵다면 Actions 모드가 가장 편합니다.
+설명:
+- 로컬 인박스는 이메일 자격증명이 전혀 필요 없습니다.
+- Gmail OAuth는 옵션 기능이며, 공개 사용자 대상으로 안정적으로 운영하려면 Google 쪽 설정과 검증 이슈를 확인해야 합니다.
+- Gmail 앱 비밀번호는 가장 단순한 fallback 경로입니다.
 
-### 필수 워크플로우
-- 자동 발송: `../../.github/workflows/paper-morning-digest.yml`
-- 초기 쿼리 자동생성: `../../.github/workflows/paper-morning-bootstrap-topics.yml`
-
-### 필수 Secret
-- `PM_ENV_FILE` : `.env` 전체 내용
-- `PM_TOPICS_JSON` : `user_topics.json` 전체 내용
-
-### 선택 Secret
-- `PM_PROJECTS_JSON` : 프로젝트 목록만 담은 JSON (초기 쿼리 생성용)
-
-### 스케줄
-- 워크플로우는 15분 간격(`*/15 * * * *`, UTC)으로 폴링 실행됩니다.
-- 실제 메일 발송은 아래 조건을 모두 만족할 때만 실행됩니다.
-  - 로컬 발송 시각 윈도우(`TIMEZONE` + `SEND_HOUR` + `SEND_MINUTE`)
-  - 주기 정책(`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`)
-  - 로컬 날짜 기준 1회 발송 락
-
-## 핵심 설정값
-`SEND_FREQUENCY` / `SEND_ANCHOR_DATE`
-- 발송 주기 제어
-- `SEND_ANCHOR_DATE`를 기준으로 3일/7일 주기 계산
-
-`LOOKBACK_HOURS`
-- 최근 몇 시간 이내 논문을 수집할지 설정
-- 주기형 발송에서는 최소 주기 길이(예: weekly면 최소 168h)로 자동 보정
-
-`LLM_MAX_CANDIDATES`
-- 기본 후보 상한
-- 3일/주간 주기에서는 토큰 폭증을 막기 위해 비선형 확장 적용
-
-`ENABLE_GOOGLE_SCHOLAR` / `GOOGLE_SCHOLAR_API_KEY`
-- Google Scholar 수집 활성화(SerpAPI 키 필요)
-
-## 소스별 참고
-- arXiv: 기본 제공
-- PubMed: `NCBI_API_KEY` 넣으면 안정성 향상
-- Semantic Scholar: API 키 권장
-- Google Scholar: 공식 API가 아니라 SerpAPI 연동 방식
-
-## 배포 파일 만들기
-아래 명령은 **저장소 루트**에서 실행합니다.
-
-### Windows
-```powershell
-.\tools\build_windows.ps1
-```
-
-### Linux
-```bash
-chmod +x tools/build_linux.sh
-./tools/build_linux.sh
-```
-
-## 문제 해결 빠른 체크
-- `검색 쿼리 없음`: Topic Editor에서 쿼리 생성 후 저장했는지 확인
-- `PubMed 429`: 앱이 자동 재시도하지만, `NCBI_API_KEY` 설정 권장
-- `Gemini 모델 404`: 모델명 확인 (`gemini-3.1-pro` 또는 `gemini-3.1-flash`)
-- 메일 미수신: 발신/수신 주소, 스팸함, 인증 방식 확인
-
-## 인증 방식 우선순위
-1. **Gmail 앱 비밀번호 (현재 기본 권장)**
-2. **Google OAuth (보류/실험)**
-
-### Gmail 앱 비밀번호 안내
-- 일반 계정 비밀번호가 아닙니다.
-- 2단계 인증 활성화 후 16자리 앱 비밀번호를 사용해야 합니다.
-- 발급 링크: https://myaccount.google.com/apppasswords
-
-### Google OAuth 안내 (보류)
-- 현재 공개 배포 기본 경로에서는 OAuth를 기본값으로 쓰지 않습니다.
-- 안정화/운영정책 확정 전까지는 Gmail 앱 비밀번호 방식을 사용하세요.
+## 빠른 링크
+- 초보자 가이드: [MANUAL_FIRSTTIME_KR.md](./MANUAL_FIRSTTIME_KR.md)
+- 고급 운영/자동화: [MANUAL_KR.md](./MANUAL_KR.md)
+- English README: [../../README.md](../../README.md)
 
 ## 문의
 - `nineclas@gmail.com`

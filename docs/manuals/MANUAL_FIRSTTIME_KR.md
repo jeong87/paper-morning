@@ -1,127 +1,127 @@
-﻿# Paper Morning 초보자 매뉴얼 (Preview-First)
+# Paper Morning 초보자 매뉴얼
 
-이 문서는 처음 사용하는 분을 위한 빠른 가이드입니다.
-핵심 목표는 **자동화보다 먼저, 내 주제에 맞는 미리보기 결과를 바로 확인하는 것**입니다.
+이 문서는 처음 사용하는 분을 위한 빠른 시작 가이드입니다.  
+핵심 목표는 자동화보다 먼저, **내 연구 맥락에 맞는 논문이 실제로 잘 잡히는지 확인하는 것**입니다.
 
-## 0) 5분 체크리스트
-1. Gemini API Key 1개
-2. Python 3.11+
-3. 로컬에 이 저장소 코드
-4. (선택) 나중에 Gmail/GitHub 계정
+## 0. 준비물
+1. Python 3.11+
+2. 이 저장소 코드
+3. Gemini API key 1개
+4. 이메일 설정은 당장은 필요 없음
 
-## 1) 먼저 성공해야 할 것
-먼저 할 일:
-- 프로젝트 설명 입력
-- 검색 결과 1회 생성
-
-나중에 할 일:
-- 이메일 발송 설정
-- GitHub Actions 자동화 설정
-
-## 2) Gemini API Key 발급
-1. Google AI Studio 접속
-2. `Get API key` 클릭
-3. 키 복사 및 보관
-
-링크:
+Gemini API key 발급:
 - https://aistudio.google.com/app/apikey
 
-## 3) 첫 미리보기 생성 (로컬 권장)
-1. 의존성 설치:
+## 1. 가장 먼저 확인할 것
+먼저 할 일:
+- 프로젝트 설명 입력
+- 검색 모드 선택
+- 논문 검색 결과 1회 생성
+
+나중에 할 일:
+- 아침 팝업 자동화
+- Gmail 연동
+- GitHub Actions 자동화
+
+## 2. 설치 없이 먼저 체험하기
+GitHub에서 바로 확인하려면:
+
+- 한글 라이브 프리뷰: https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index_ko.html
+
+이 경로는 설치 없이 브라우저에서 바로 동작합니다.  
+결과는 새 탭 HTML로 열리며, 실제 이메일은 보내지 않습니다.
+
+## 3. 로컬 설치 후 첫 실행
+1. 의존성 설치
 
 ```bash
 pip install -r deps/requirements.txt
 ```
 
-2. 웹 콘솔 실행:
+2. 로컬 런처 실행
 
 ```bash
-python app/web_app.py --host 127.0.0.1 --port 5050
+python app/local_ui_launcher.py
 ```
 
-3. 브라우저 열기:
+3. 브라우저가 자동으로 열리지 않으면 아래 주소로 접속
 
 ```text
-http://127.0.0.1:5050/setup
+http://127.0.0.1:5050
 ```
 
-4. 필수 항목 입력:
-- Onboarding mode: `Preview mode`
+4. 첫 실행이면 setup 화면으로 자동 이동합니다.
+
+## 4. setup에서 입력할 것
+- Onboarding mode: `preview`
 - 프로젝트 이름
-- 프로젝트 컨텍스트(연구 맥락)
-- 키워드(선택)
-- Gemini API Key
+- 프로젝트 컨텍스트
+- 추가 키워드(선택)
+- Gemini API key
+- 기본 검색 모드
+  - `best_match`
+  - `whats_new`
+  - `discovery`
+- 기본 검색 기간
+  - `7d`, `30d`, `180d`, `1y`, `3y`, `5y`
 
-5. `Save and Search Now` 클릭
-6. Dashboard에서 확인:
-- `Latest Preview Output`
-- 상단 논문 카드/진단 정보
-- 점수 분포(`9-10 / 7-8 / 5-6 / 1-4 / 0`)
-- 스코어링 목록(`score | title`)으로 임계값 조정 가능
+추천:
+- 처음에는 `best_match + 1y`
+- 최신성 확인이 중요하면 `whats_new + 30d`
+- 인접 방법론까지 보고 싶으면 `discovery + 3y`
 
-검색 결과 품질이 괜찮으면 아래 선택 단계를 진행하세요.
+## 5. 첫 검색 실행
+1. `Save and Search Now` 클릭
+2. 새 탭 또는 결과 화면에서 아래를 확인
+   - 어떤 기간으로 검색했는지
+   - 몇 편을 검토했고 몇 편을 선정했는지
+   - 왜 내 연구와 맞는지
+   - 핵심 포인트
+   - 어떻게 활용할 수 있는지
 
-## 4) 선택: 이메일 발송 켜기 (미리보기 후)
-`/setup`의 **Automation + email transport (advanced)** 를 열고 입력:
-- `GMAIL_ADDRESS`
-- `RECIPIENT_EMAIL`
-- `GMAIL_APP_PASSWORD` (SMTP 모드)
-- 타임존/발송 시각
+검색 결과가 괜찮다면 그 다음부터는 홈 화면에서 버튼 한 번으로 다시 검색할 수 있습니다.
 
-Gmail 앱 비밀번호 안내:
-- https://myaccount.google.com/apppasswords
+## 6. 로컬 인박스란?
+`로컬 인박스`는 메일 대신 검색 결과를 로컬 파일로 저장하고 브라우저에서 다시 여는 방식입니다.
 
-## 5) 선택: GitHub Actions 자동화 켜기
-### 5-1) 템플릿으로 내 저장소 만들기 (권장)
-온보딩 기본 경로는 Fork보다 **Use this template** 입니다.
+장점:
+- Gmail 설정이 필요 없음
+- 다른 사람 메일을 거치지 않음
+- 가장 설치 허들이 낮음
 
-### 5-2) 워크플로우 활성화
-내 저장소에서:
-1. `Actions` 탭 클릭
-2. (최초 1회) `I understand my workflows, go ahead and enable them` 클릭
+즉, Paper Morning의 기본 경로는 이제  
+`연구 컨텍스트 입력 -> 검색 -> 로컬에서 결과 확인` 입니다.
 
-### 5-3) Secret 등록
-경로:
-- `Repository > Settings > Secrets and variables > Actions > New repository secret`
+## 7. 자동화는 필요할 때만
+원하면 나중에 아래를 켤 수 있습니다.
 
-필수:
-1. `PM_ENV_FILE` (`.env` 전체 텍스트)
+- 아침 9시 팝업 자동 실행
+- Gmail OAuth
+- Gmail 앱 비밀번호
+- GitHub Actions 스케줄 실행
 
-선택:
-1. `PM_TOPICS_JSON` (`user_topics.json` 전체 텍스트)
-2. `PM_PROJECTS_JSON` (bootstrap용 프로젝트 목록)
+권장 우선순위:
+1. 로컬 인박스로 먼저 검증
+2. 필요하면 아침 팝업
+3. 그 다음 이메일
 
-참고:
-- 민감하지 않은 프로젝트 설정은 `config/projects.yaml` 파일로 관리 가능
-- Preview-first 전환 후 `PM_TOPICS_JSON`는 필수가 아닙니다
+## 8. 자주 생기는 문제
+`Gemini API key is required`
+- setup 또는 라이브 프리뷰에 Gemini key가 비어 있습니다.
 
-### 5-4) 수동 첫 실행
-1. `paper-morning-digest` 실행
-2. `Run mode`를 `dry_run`으로 선택
-3. 로그/미리보기 결과 확인
-4. 이메일 설정 완료 후 `send_now` 1회 실행
+`No papers found`
+- 컨텍스트가 너무 좁거나 키워드가 과하게 제한적일 수 있습니다.
+- `1y -> 3y -> 5y`로 기간을 넓혀보세요.
+- `best_match` 대신 `discovery`를 시도해보세요.
 
-## 6) private repo 비용 주의
-- private 저장소는 GitHub Actions 무료 분(minute) 한도가 있습니다.
-- 짧은 주기 스케줄은 월 한도를 빨리 소모할 수 있습니다.
-- 시작은 local preview/local setup 경로를 권장합니다.
+`Quota exhausted`
+- 선택한 Gemini 모델 quota가 부족할 수 있습니다.
+- 앱은 여러 Gemini 모델을 자동 폴백 시도한 뒤 최종 실패 시에만 quota 메시지를 보여줍니다.
 
-## 7) 자주 나는 오류
-1. `Search query is empty`
-- 원인: 토픽 쿼리가 아직 생성/저장되지 않음
-- 해결: setup에서 preview 실행(자동 bootstrap) 또는 Topic Editor에서 생성/저장
+`Popup blocked`
+- 브라우저가 새 탭을 막고 있습니다.
+- `127.0.0.1:5050` 또는 raw.githack 페이지의 팝업을 허용하세요.
 
-2. `No LLM relevance reason generated`
-- 원인: LLM 요약 비활성 또는 LLM 호출 실패
-- 해결: `GEMINI_API_KEY`, 모델명, `ENABLE_LLM_AGENT=true` 확인
-
-3. `Missing required env vars for email`
-- 원인: 이메일 필드 미입력
-- 해결: preview-only 단계에서는 정상, 이메일 발송을 켤 때만 입력
-
-4. `PM_TOPICS_JSON is not valid JSON`
-- 원인: JSON 형식 깨짐
-- 해결: 따옴표(`"`), 쉼표(`,`), 괄호(`{}`, `[]`) 형식 확인
-
-## 8) 문의
-- nineclas@gmail.com
+## 9. 다음 문서
+- 한글 README: [README_KR.md](./README_KR.md)
+- 고급 자동화/운영: [MANUAL_KR.md](./MANUAL_KR.md)
