@@ -1,8 +1,8 @@
 ﻿# Paper Morning Beginner Manual (Preview-First)
 
 This guide is for first-time users.
-The goal is simple: **get your first personalized digest preview first**.
-Automation and email can be enabled after preview quality is confirmed.
+The goal is simple: **get your first personalized search result first**.
+Automation and email can be enabled after search quality is confirmed.
 
 ## 0) 5-minute checklist
 1. One Gemini API key
@@ -13,7 +13,7 @@ Automation and email can be enabled after preview quality is confirmed.
 ## 1) First success target
 Do this first:
 - Enter your project description
-- Generate one digest preview
+- Generate one search result
 
 Do this later:
 - Configure email delivery
@@ -53,14 +53,14 @@ http://127.0.0.1:5050/setup
 - Optional keywords
 - Gemini API key
 
-5. Click `Save and Preview Now`
+5. Click `Save and Search Now`
 6. Go to Dashboard and check:
 - `Latest Preview Output`
 - top paper cards and diagnostics
 - score distribution (`9-10 / 7-8 / 5-6 / 1-4 / 0`)
 - scored paper list (`score | title`) to tune threshold if needed
 
-If this preview looks relevant, move to optional steps below.
+If this result looks relevant, move to optional steps below.
 
 ## 4) Optional: enable email delivery (after preview)
 In `/setup`, open **Automation + email transport (advanced)** and fill:

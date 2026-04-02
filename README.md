@@ -1,13 +1,13 @@
 ﻿# Paper Morning
 
-[![Paper Morning Logo](assets/papermorning2.png)](https://raw.githack.com/jeong87/paper-morning/main/docs/demo/index.html)
+[![Paper Morning Logo](assets/papermorning2.png)](https://raw.githack.com/jeong87/paper-morning/main/docs/preview/index.html)
 
 **[EN](README.md) | [KR](docs/manuals/README_KR.md)**
 
-Paper Morning is an automated paper briefing tool for medical/health AI researchers.
-It fetches recent papers, ranks relevance with LLM + project context, and delivers a concise digest to a local inbox by default, with Gmail delivery as an optional advanced mode.
+Paper Morning is a research-context paper search tool for medical/health AI researchers.
+It turns a project description into search queries, retrieves papers, ranks them by practical relevance, and explains why they matter. Local inbox and scheduled digest delivery remain available as optional follow-up modes.
 
-- Latest version: **[v0.5.2](VERSION)**
+- Latest version: **[v0.7.0](VERSION)**
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 
@@ -18,11 +18,11 @@ If you want to understand the product from GitHub first:
 
 What happens on that page:
 - The page itself explains what Paper Morning does before you run anything
-- Enter your research context and Gemini API key
+- Enter your research context, choose a search mode, and paste a Gemini API key
 - The page generates search queries from your context
-- It retrieves real recent candidates from arXiv and PubMed, starting from the last 7 days and widening up to 6 months if needed
+- It retrieves real candidates from arXiv and PubMed based on your chosen intent and time horizon
 - It ranks and summarizes them with Gemini
-- It opens the email-style HTML preview in a new browser tab
+- It opens the ranked result page in a new browser tab
 
 Notes:
 - Client-side only (runs in your browser)
@@ -33,10 +33,11 @@ Notes:
 1. Reads your project context and saved search queries.
 2. Collects papers from arXiv, PubMed, Semantic Scholar, and optional Google Scholar (SerpAPI).
 3. Scores each paper (1-10) with LLM relevance ranking.
-4. Saves or sends only high-relevance papers with short summaries.
+4. Lets you inspect results on demand, then optionally save or deliver them later.
 
 ## Key Features
 - Personalized LLM relevance ranking using your active projects.
+- Search intents for recent updates, best-fit papers, and broader discovery.
 - Per-project mail cadence (`daily` / `every_3_days` / `weekly`) in Topic Editor.
 - Local inbox mode with browser popup scheduling on a running PC.
 - Configurable cadence: `daily`, `every_3_days`, `weekly`.
@@ -52,8 +53,8 @@ Notes:
 - Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
 - Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
 
-## Recommended First Path (Preview-First, Local)
-Generate your first personalized digest preview before email/automation setup.
+## Recommended First Path (Search-First, Local)
+Generate your first personalized search result before email or automation setup.
 
 1. Install dependencies:
 
@@ -68,14 +69,14 @@ python app/local_ui_launcher.py
 ```
 
 3. The browser opens automatically. On first run, Setup Wizard opens automatically.
-4. Fill project description + Gemini key, then click `Save and Preview Now`.
+4. Fill project description + Gemini key, then click `Save and Search Now`.
 
 This verifies product value first without Gmail or GitHub Actions setup. After setup, the default path is:
-- Click one button to generate and open the latest digest in a browser tab
+- Click one button to search and open the latest result in a browser tab
 - Or keep the local UI running and let the scheduled morning popup open automatically
 
 ## GitHub Actions Mode (Advanced Automation)
-Use this after preview quality is confirmed.
+Use this only after local search quality is confirmed and you really want automation.
 
 Required workflow files:
 - `.github/workflows/paper-morning-digest.yml`
@@ -93,9 +94,11 @@ Tracked non-secret config:
 
 ## Important Settings
 - `ONBOARDING_MODE`: `preview` (default) or `daily`.
+- `SEARCH_INTENT_DEFAULT`: default local search mode (`best_match`, `whats_new`, `discovery`).
+- `SEARCH_TIME_HORIZON_DEFAULT`: default local search horizon (`7d`, `30d`, `180d`, `1y`, `3y`, `5y`).
 - `SEND_FREQUENCY` / `SEND_ANCHOR_DATE`: cadence policy.
-- `LOOKBACK_HOURS`: search window length.
-- `LLM_MAX_CANDIDATES`: prefilter cap for LLM scoring.
+- `LOOKBACK_HOURS`: legacy fallback window for digest-style collection.
+- `LLM_MAX_CANDIDATES`: shortlist cap for listwise LLM reranking.
 - `OUTPUT_LANGUAGE`: summary language for LLM-generated reason/core/usefulness text.
 - `ENABLE_GOOGLE_SCHOLAR` + `GOOGLE_SCHOLAR_API_KEY`: optional SerpAPI source.
 

@@ -81,6 +81,58 @@ LLM_RELEVANCE_MODE_DEFAULT = "balanced"
 DELIVERY_MODE_LOCAL_INBOX = "local_inbox"
 DELIVERY_MODE_GMAIL_OAUTH = "gmail_oauth"
 DELIVERY_MODE_GMAIL_APP_PASSWORD = "gmail_app_password"
+SEARCH_INTENT_DEFAULT = "best_match"
+SEARCH_TIME_HORIZON_DEFAULT = "1y"
+TIME_HORIZON_OPTIONS: Dict[str, Dict[str, Any]] = {
+    "7d": {"hours": 24 * 7, "label": "Last 7 days"},
+    "30d": {"hours": 24 * 30, "label": "Last 30 days"},
+    "180d": {"hours": 24 * 180, "label": "Last 6 months"},
+    "1y": {"hours": 24 * 365, "label": "Last 1 year"},
+    "3y": {"hours": 24 * 365 * 3, "label": "Last 3 years"},
+    "5y": {"hours": 24 * 365 * 5, "label": "Last 5 years"},
+}
+SEARCH_INTENT_POLICIES: Dict[str, Dict[str, Any]] = {
+    "best_match": {
+        "label": "Best Match",
+        "description": "Search within the selected time window and rank for strongest project fit.",
+        "default_horizon": "1y",
+        "horizon_options": ["180d", "1y", "3y", "5y"],
+        "arxiv_sort": "relevance",
+        "pubmed_sort": "relevance",
+        "arxiv_max_results": 60,
+        "pubmed_max_results": 80,
+        "semantic_max_results": 40,
+        "google_scholar_max_results": 20,
+        "min_score": 6.0,
+    },
+    "whats_new": {
+        "label": "What's New",
+        "description": "Prefer the newest directly useful papers, widening the window only when needed.",
+        "default_horizon": "30d",
+        "horizon_options": ["7d", "30d", "180d", "1y"],
+        "arxiv_sort": "submittedDate",
+        "pubmed_sort": "pub date",
+        "arxiv_max_results": 70,
+        "pubmed_max_results": 90,
+        "semantic_max_results": 45,
+        "google_scholar_max_results": 20,
+        "min_score": 6.0,
+    },
+    "discovery": {
+        "label": "Discovery",
+        "description": "Allow adjacent methods and high-upside transfer papers within a broader window.",
+        "default_horizon": "3y",
+        "horizon_options": ["180d", "1y", "3y", "5y"],
+        "arxiv_sort": "relevance",
+        "pubmed_sort": "relevance",
+        "arxiv_max_results": 80,
+        "pubmed_max_results": 100,
+        "semantic_max_results": 50,
+        "google_scholar_max_results": 25,
+        "min_score": 5.5,
+    },
+}
+WHATS_NEW_ADAPTIVE_STEPS = ["7d", "30d", "180d", "1y", "3y", "5y"]
 LLM_RELEVANCE_MODE_POLICIES: Dict[str, Dict[str, Any]] = {
     "strict": {
         "label": "Strict",
@@ -154,6 +206,53 @@ def normalize_delivery_mode(raw: Any) -> str:
     return DELIVERY_MODE_LOCAL_INBOX
 
 
+def normalize_search_intent(raw: Any) -> str:
+    value = clean_text(str(raw or "")).lower()
+    if value in {"latest", "recent", "new", "whats_new", "what's new"}:
+        return "whats_new"
+    if value in {"discover", "discovery", "explore", "exploratory"}:
+        return "discovery"
+    return SEARCH_INTENT_DEFAULT
+
+
+def get_search_intent_policy(intent: Any) -> Dict[str, Any]:
+    return SEARCH_INTENT_POLICIES[normalize_search_intent(intent)]
+
+
+def search_intent_label(intent: Any) -> str:
+    return str(get_search_intent_policy(intent).get("label", "Best Match"))
+
+
+def normalize_time_horizon_key(raw: Any, intent: Any = None) -> str:
+    value = clean_text(str(raw or "")).lower()
+    if value in TIME_HORIZON_OPTIONS:
+        normalized = value
+    elif value in {"6m", "half_year"}:
+        normalized = "180d"
+    elif value in {"12m"}:
+        normalized = "1y"
+    else:
+        normalized = ""
+    policy = get_search_intent_policy(intent)
+    allowed = policy.get("horizon_options", [])
+    if normalized and normalized in allowed:
+        return normalized
+    default_horizon = str(policy.get("default_horizon", SEARCH_TIME_HORIZON_DEFAULT))
+    if default_horizon in TIME_HORIZON_OPTIONS:
+        return default_horizon
+    return SEARCH_TIME_HORIZON_DEFAULT
+
+
+def time_horizon_hours(key: Any, intent: Any = None) -> int:
+    normalized = normalize_time_horizon_key(key, intent)
+    return int(TIME_HORIZON_OPTIONS.get(normalized, TIME_HORIZON_OPTIONS[SEARCH_TIME_HORIZON_DEFAULT])["hours"])
+
+
+def time_horizon_label(key: Any, intent: Any = None) -> str:
+    normalized = normalize_time_horizon_key(key, intent)
+    return str(TIME_HORIZON_OPTIONS.get(normalized, TIME_HORIZON_OPTIONS[SEARCH_TIME_HORIZON_DEFAULT])["label"])
+
+
 def delivery_mode_label(mode: str) -> str:
     normalized = normalize_delivery_mode(mode)
     if normalized == DELIVERY_MODE_GMAIL_OAUTH:
@@ -223,6 +322,15 @@ class Paper:
 
 
 @dataclass
+class SearchRequest:
+    intent: str
+    time_horizon_key: str
+    time_horizon_hours: int
+    intent_label: str
+    time_horizon_label: str
+
+
+@dataclass
 class AppConfig:
     gmail_address: str
     gmail_app_password: str
@@ -238,6 +346,8 @@ class AppConfig:
     send_hour: int
     send_minute: int
     send_time_window_minutes: int
+    search_intent_default: str
+    search_time_horizon_default: str
     max_papers: int
     lookback_hours: int
     min_relevance_score: float
@@ -312,6 +422,15 @@ class DigestStats:
     scored_examples: List[str] = field(default_factory=list)
     project_cadence_summary: List[str] = field(default_factory=list)
     project_cadence_filtered_out: int = 0
+    search_intent: str = SEARCH_INTENT_DEFAULT
+    search_intent_label: str = "Best Match"
+    requested_time_horizon_key: str = SEARCH_TIME_HORIZON_DEFAULT
+    requested_time_horizon_label: str = "Last 1 year"
+    window_used_hours: int = 0
+    window_used_label: str = ""
+    query_plan_label: str = ""
+    search_notice: str = ""
+    no_results_reason: str = ""
 
 
 def mask_sensitive_text(text: str, extra_values: List[str] | None = None) -> str:
@@ -1165,7 +1284,7 @@ def load_topic_configuration(
         logging.warning(
             (
                 "Topic config is empty at %s. Configure projects, then generate/save queries in Topic Editor "
-                "before running digest."
+                "before running local search."
             ),
             path,
         )
@@ -1313,6 +1432,200 @@ def build_project_context_text(projects: List[ResearchProject]) -> str:
     for idx, project in enumerate(projects, start=1):
         lines.append(f"{idx}. {project.name}: {project.context}")
     return "\n".join(lines)
+
+
+def resolve_search_request(
+    config: AppConfig,
+    search_intent: str | None = None,
+    time_horizon_key: str | None = None,
+) -> SearchRequest:
+    intent = normalize_search_intent(search_intent or config.search_intent_default)
+    horizon_key = normalize_time_horizon_key(time_horizon_key or config.search_time_horizon_default, intent)
+    return SearchRequest(
+        intent=intent,
+        time_horizon_key=horizon_key,
+        time_horizon_hours=time_horizon_hours(horizon_key, intent),
+        intent_label=search_intent_label(intent),
+        time_horizon_label=time_horizon_label(horizon_key, intent),
+    )
+
+
+def build_search_query_plans(config: AppConfig) -> List[Dict[str, List[str] | str]]:
+    project_terms: List[str] = []
+    for project in config.research_projects:
+        project_terms.extend(extract_query_terms(f"{project.name} {project.context}"))
+    project_terms = dedupe_list(project_terms)
+
+    saved_plan = {
+        "label": "saved topic queries",
+        "arxiv_queries": dedupe_list(list(config.arxiv_queries))[: config.max_search_queries_per_source],
+        "pubmed_queries": dedupe_list(list(config.pubmed_queries))[: config.max_search_queries_per_source],
+        "semantic_queries": dedupe_list(list(config.semantic_scholar_queries))[: config.max_search_queries_per_source],
+        "google_queries": dedupe_list(list(config.google_scholar_queries))[: config.max_search_queries_per_source],
+    }
+    plans: List[Dict[str, List[str] | str]] = [saved_plan]
+
+    relaxed_plan = {
+        "label": "broader fallback queries",
+        "arxiv_queries": build_relaxed_queries_for_source(saved_plan["arxiv_queries"], "arxiv", project_terms)
+        if saved_plan["arxiv_queries"]
+        else [],
+        "pubmed_queries": build_relaxed_queries_for_source(saved_plan["pubmed_queries"], "pubmed", project_terms)
+        if saved_plan["pubmed_queries"]
+        else [],
+        "semantic_queries": build_relaxed_queries_for_source(saved_plan["semantic_queries"], "semantic", project_terms)
+        if saved_plan["semantic_queries"]
+        else [],
+        "google_queries": build_relaxed_queries_for_source(saved_plan["google_queries"], "google", project_terms)
+        if saved_plan["google_queries"]
+        else [],
+    }
+    if any(relaxed_plan[key] for key in ("arxiv_queries", "pubmed_queries", "semantic_queries", "google_queries")):
+        differs = False
+        for key in ("arxiv_queries", "pubmed_queries", "semantic_queries", "google_queries"):
+            if list(relaxed_plan[key]) != list(saved_plan[key]):
+                differs = True
+                break
+        if differs:
+            plans.append(relaxed_plan)
+    return plans
+
+
+def build_search_candidate_terms(config: AppConfig) -> List[str]:
+    terms: List[str] = []
+    for profile in config.topic_profiles:
+        terms.extend(profile.keywords.keys())
+    for project in config.research_projects:
+        terms.extend(extract_query_terms(f"{project.name} {project.context}"))
+    return dedupe_list([clean_text(term).lower() for term in terms if clean_text(term)])[:12]
+
+
+def count_term_hits(text: str, terms: List[str]) -> int:
+    normalized = clean_text(text).lower()
+    score = 0
+    for term in terms:
+        if term and term in normalized:
+            score += 2 if " " in term else 1
+    return score
+
+
+def recency_signal(paper: Paper, now_utc: datetime) -> float:
+    age_days = max(0.0, (now_utc - paper.published_at_utc).total_seconds() / 86400.0)
+    return 1.0 / (1.0 + age_days / 45.0)
+
+
+def candidate_priority(
+    intent: str,
+    paper: Paper,
+    terms: List[str],
+    now_utc: datetime,
+) -> float:
+    title_hits = count_term_hits(paper.title, terms)
+    abstract_hits = count_term_hits(paper.abstract, terms)
+    keyword_score = title_hits * 3 + abstract_hits
+    freshness = recency_signal(paper, now_utc)
+    if normalize_search_intent(intent) == "whats_new":
+        return freshness * 10.0 + keyword_score * 1.4
+    if normalize_search_intent(intent) == "discovery":
+        return keyword_score * 2.1 + freshness * 1.1
+    return keyword_score * 2.7 + freshness * 1.4
+
+
+def prioritize_candidates_for_search(
+    papers: List[Paper],
+    config: AppConfig,
+    search_request: SearchRequest,
+    now_utc: datetime,
+) -> List[Paper]:
+    if not papers:
+        return []
+    terms = build_search_candidate_terms(config)
+    for paper in papers:
+        apply_topic_metadata_to_paper(paper, config)
+    return sorted(
+        papers,
+        key=lambda item: (
+            candidate_priority(search_request.intent, item, terms, now_utc),
+            item.score,
+            item.published_at_utc,
+        ),
+        reverse=True,
+    )
+
+
+def filter_papers_by_horizon(papers: List[Paper], now_utc: datetime, horizon_hours: int) -> List[Paper]:
+    since_utc = now_utc - timedelta(hours=max(1, horizon_hours))
+    return [paper for paper in papers if since_utc <= paper.published_at_utc <= now_utc]
+
+
+def dedupe_papers_by_title(papers: List[Paper]) -> List[Paper]:
+    by_key: Dict[str, Paper] = {}
+    for paper in sorted(papers, key=lambda item: item.published_at_utc, reverse=True):
+        key = clean_text(paper.title).lower()
+        if not key:
+            key = clean_text(paper.paper_id).lower()
+        if not key:
+            continue
+        if key not in by_key:
+            by_key[key] = paper
+    return list(by_key.values())
+
+
+def build_search_retrieval_settings(search_request: SearchRequest) -> Dict[str, Any]:
+    policy = get_search_intent_policy(search_request.intent)
+    hours = search_request.time_horizon_hours
+    if hours >= TIME_HORIZON_OPTIONS["5y"]["hours"]:
+        horizon_boost = 1.35
+    elif hours >= TIME_HORIZON_OPTIONS["3y"]["hours"]:
+        horizon_boost = 1.2
+    elif hours >= TIME_HORIZON_OPTIONS["1y"]["hours"]:
+        horizon_boost = 1.1
+    else:
+        horizon_boost = 1.0
+    return {
+        "arxiv_sort": str(policy.get("arxiv_sort", "submittedDate")),
+        "pubmed_sort": str(policy.get("pubmed_sort", "pub date")),
+        "arxiv_max_results": min(140, round(float(policy.get("arxiv_max_results", 60)) * horizon_boost)),
+        "pubmed_max_results": min(180, round(float(policy.get("pubmed_max_results", 80)) * horizon_boost)),
+        "semantic_max_results": min(100, round(float(policy.get("semantic_max_results", 40)) * horizon_boost)),
+        "google_scholar_max_results": min(
+            GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT,
+            round(float(policy.get("google_scholar_max_results", 20)) * horizon_boost),
+        ),
+    }
+
+
+def build_whats_new_horizon_steps(search_request: SearchRequest) -> List[Tuple[str, int]]:
+    max_hours = search_request.time_horizon_hours
+    steps: List[Tuple[str, int]] = []
+    for key in WHATS_NEW_ADAPTIVE_STEPS:
+        hours = time_horizon_hours(key, search_request.intent)
+        if hours <= max_hours:
+            steps.append((key, hours))
+    if not steps or steps[-1][1] != max_hours:
+        steps.append((search_request.time_horizon_key, max_hours))
+    return steps
+
+
+def build_search_intent_prompt_lines(search_request: SearchRequest) -> List[str]:
+    if search_request.intent == "whats_new":
+        return [
+            "Search intent is What's New.",
+            "Prioritize recent papers that are still directly useful to the user's work.",
+            "Freshness matters, but do not reward recency alone if relevance is weak.",
+            "If two papers are similarly relevant, prefer the newer one.",
+        ]
+    if search_request.intent == "discovery":
+        return [
+            "Search intent is Discovery.",
+            "Allow adjacent methods, datasets, or evaluation designs when transfer value is concrete.",
+            "Direct matches can rank highest, but high-upside adjacent work may also score well.",
+        ]
+    return [
+        "Search intent is Best Match.",
+        "Optimize for strongest practical fit to the user's project, even if papers are not extremely recent.",
+        "Clearly reusable methods papers may also score well when the reuse path is concrete.",
+    ]
 
 
 def call_gemini_json(config: AppConfig, prompt: str, temperature: float = 0.2) -> Any:
@@ -1529,9 +1842,17 @@ def request_arxiv_with_retry(params: Dict[str, Any]) -> requests.Response:
     raise RuntimeError(f"arXiv request failed after retries: {last_error}")
 
 
-def fetch_arxiv_papers(config: AppConfig, since_utc: datetime, queries: List[str]) -> List[Paper]:
+def fetch_arxiv_papers(
+    config: AppConfig,
+    since_utc: datetime,
+    queries: List[str],
+    *,
+    sort_by: str = "submittedDate",
+    max_results_override: int | None = None,
+) -> List[Paper]:
     papers_by_id: Dict[str, Paper] = {}
-    max_results = max(1, min(config.arxiv_max_results_per_query, ARXIV_MAX_RESULTS_HARD_LIMIT))
+    max_results = config.arxiv_max_results_per_query if max_results_override is None else int(max_results_override)
+    max_results = max(1, min(max_results, ARXIV_MAX_RESULTS_HARD_LIMIT))
     for idx, query in enumerate(queries):
         if idx > 0:
             time.sleep(ARXIV_QUERY_INTERVAL_SECONDS)
@@ -1539,7 +1860,7 @@ def fetch_arxiv_papers(config: AppConfig, since_utc: datetime, queries: List[str
             "search_query": query,
             "start": 0,
             "max_results": max_results,
-            "sortBy": "submittedDate",
+            "sortBy": sort_by,
             "sortOrder": "descending",
         }
         try:
@@ -1569,16 +1890,26 @@ def fetch_arxiv_papers(config: AppConfig, since_utc: datetime, queries: List[str
     return list(papers_by_id.values())
 
 
-def fetch_pubmed_ids(query: str, config: AppConfig) -> List[str]:
+def fetch_pubmed_ids(
+    query: str,
+    config: AppConfig,
+    *,
+    sort: str = "pub date",
+    reldate_days: int | None = None,
+    max_results_override: int | None = None,
+) -> List[str]:
     normalized_query = re.sub(r"\*{2,}", "", clean_text(query))
     if not normalized_query:
         return []
+    retmax = config.pubmed_max_ids_per_query if max_results_override is None else int(max_results_override)
+    retmax = max(1, min(retmax, 200))
+    reldate = max(1, int(config.lookback_hours / 24) + 1) if reldate_days is None else max(1, int(reldate_days))
     params = {
         "db": "pubmed",
         "term": normalized_query,
-        "retmax": config.pubmed_max_ids_per_query,
-        "sort": "pub date",
-        "reldate": max(1, int(config.lookback_hours / 24) + 1),
+        "retmax": retmax,
+        "sort": sort,
+        "reldate": reldate,
         "datetype": "pdat",
         "retmode": "json",
     }
@@ -1630,7 +1961,15 @@ def fetch_pubmed_abstracts(pubmed_ids: List[str], config: AppConfig) -> Dict[str
     return abstracts
 
 
-def fetch_pubmed_papers(config: AppConfig, since_utc: datetime, queries: List[str]) -> List[Paper]:
+def fetch_pubmed_papers(
+    config: AppConfig,
+    since_utc: datetime,
+    queries: List[str],
+    *,
+    sort: str = "pub date",
+    reldate_days: int | None = None,
+    max_results_override: int | None = None,
+) -> List[Paper]:
     all_ids: List[str] = []
     seen_ids = set()
     for idx, query in enumerate(queries):
@@ -1642,7 +1981,13 @@ def fetch_pubmed_papers(config: AppConfig, since_utc: datetime, queries: List[st
             )
             time.sleep(interval)
         try:
-            ids = fetch_pubmed_ids(query, config)
+            ids = fetch_pubmed_ids(
+                query,
+                config,
+                sort=sort,
+                reldate_days=reldate_days,
+                max_results_override=max_results_override,
+            )
         except Exception as exc:
             logging.warning("Skipping PubMed query due to failure: %s | query=%s", exc, query)
             continue
@@ -1768,12 +2113,16 @@ def fetch_semantic_scholar_papers(
     config: AppConfig,
     since_utc: datetime,
     queries: List[str],
+    *,
+    max_results_override: int | None = None,
 ) -> List[Paper]:
     papers_by_id: Dict[str, Paper] = {}
-    max_results = max(
-        1,
-        min(config.semantic_scholar_max_results_per_query, SEMANTIC_SCHOLAR_MAX_RESULTS_HARD_LIMIT),
+    configured_max = (
+        config.semantic_scholar_max_results_per_query
+        if max_results_override is None
+        else int(max_results_override)
     )
+    max_results = max(1, min(configured_max, SEMANTIC_SCHOLAR_MAX_RESULTS_HARD_LIMIT))
     headers: Dict[str, str] = {}
     if config.semantic_scholar_api_key:
         headers["x-api-key"] = config.semantic_scholar_api_key
@@ -1867,16 +2216,20 @@ def fetch_google_scholar_papers(
     since_utc: datetime,
     now_utc: datetime,
     queries: List[str],
+    *,
+    max_results_override: int | None = None,
 ) -> List[Paper]:
     if not config.google_scholar_api_key:
         logging.warning("Skipping Google Scholar search: GOOGLE_SCHOLAR_API_KEY is not set.")
         return []
 
     papers_by_id: Dict[str, Paper] = {}
-    max_results = max(
-        1,
-        min(config.google_scholar_max_results_per_query, GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT),
+    configured_max = (
+        config.google_scholar_max_results_per_query
+        if max_results_override is None
+        else int(max_results_override)
     )
+    max_results = max(1, min(configured_max, GOOGLE_SCHOLAR_MAX_RESULTS_HARD_LIMIT))
 
     for idx, query in enumerate(queries):
         if idx > 0:
@@ -1981,16 +2334,24 @@ def build_llm_scoring_prompt(
     project_names: List[str],
     payload_items: List[Dict[str, Any]],
     output_language: str,
-    relevance_mode: str,
-    min_score: float,
+    search_request: SearchRequest,
 ) -> str:
-    policy = get_relevance_mode_policy(relevance_mode)
-    policy_lines = "\n".join(f"- {line}" for line in policy.get("prompt_lines", []))
+    policy_blocks: List[str] = []
+    for mode in ("strict", "balanced", "discovery"):
+        policy = get_relevance_mode_policy(mode)
+        threshold = relevance_mode_threshold(mode, 6.0)
+        mode_lines = "\n".join(f"  - {line}" for line in policy.get("prompt_lines", []))
+        policy_blocks.append(
+            f"{relevance_mode_label(mode)} mode (pass >= {threshold:.1f}):\n{mode_lines}"
+        )
+    policy_lines = "\n".join(policy_blocks)
+    intent_lines = "\n".join(f"- {line}" for line in build_search_intent_prompt_lines(search_request))
     return (
         "You are a personalized research assistant.\n"
         "Evaluate how relevant each paper is to the user's research projects.\n"
         "Each paper includes a primary matched topic_name and that topic's relevance_mode.\n"
         "Use the matched topic as the first lens, then map the paper to the best project_name when possible.\n"
+        "All candidates are shown together so you can rank them on a consistent shared scale.\n"
         "Project context:\n"
         f"{project_context}\n\n"
         "For each paper, do the following:\n"
@@ -2013,11 +2374,14 @@ def build_llm_scoring_prompt(
         "    }\n"
         "  ]\n"
         "}\n"
-        f"Scoring policy ({relevance_mode_label(relevance_mode)} mode):\n"
+        "Search intent guidance:\n"
+        f"{intent_lines}\n"
+        "Topic-mode scoring guidance:\n"
         f"{policy_lines}\n"
+        "- Apply the scoring policy that matches each paper's topic_mode.\n"
         "- project_name must be one of the provided project names when possible; otherwise use empty string.\n"
         "- score must be integer 1..10\n"
-        f"- score >= {min_score:.1f} means pass for this topic mode\n"
+        f"- requested time horizon: {search_request.time_horizon_label}\n"
         "- do not hallucinate beyond title and abstract\n\n"
         f"Allowed project names: {json.dumps(project_names, ensure_ascii=False)}\n\n"
         f"Papers JSON:\n{json.dumps(payload_items, ensure_ascii=False)}"
@@ -2025,7 +2389,9 @@ def build_llm_scoring_prompt(
 
 
 def annotate_papers_with_llm(
-    papers: List[Paper], config: AppConfig
+    papers: List[Paper],
+    config: AppConfig,
+    search_request: SearchRequest,
 ) -> Tuple[List[Paper], Dict[str, Any]]:
     if not papers:
         return [], {
@@ -2061,88 +2427,80 @@ def annotate_papers_with_llm(
                 paper.relevance_mode,
                 config.llm_relevance_threshold,
             )
-
-    papers_by_mode: Dict[str, List[Paper]] = {}
+    payload_items = []
     for paper in papers:
-        papers_by_mode.setdefault(paper.relevance_mode, []).append(paper)
+        payload_items.append(
+            {
+                "id": paper.paper_id,
+                "title": paper.title,
+                "abstract": clean_text(paper.abstract)[:1500],
+                "source": paper.source,
+                "published_at_utc": paper.published_at_utc.isoformat(),
+                "topic_name": paper.topic,
+                "topic_mode": paper.relevance_mode,
+                "topic_threshold": paper.relevance_threshold,
+                "matched_keywords": (paper.matched_keywords or [])[:8],
+            }
+        )
 
-    for relevance_mode, mode_papers in papers_by_mode.items():
-        min_score = relevance_mode_threshold(relevance_mode, config.llm_relevance_threshold)
-        for batch in chunk_list(mode_papers, max(1, config.llm_batch_size)):
-            payload_items = []
-            for paper in batch:
-                payload_items.append(
-                    {
-                        "id": paper.paper_id,
-                        "title": paper.title,
-                        "abstract": clean_text(paper.abstract)[:1500],
-                        "source": paper.source,
-                        "published_at_utc": paper.published_at_utc.isoformat(),
-                        "topic_name": paper.topic,
-                        "topic_mode": paper.relevance_mode,
-                        "matched_keywords": (paper.matched_keywords or [])[:8],
-                    }
-                )
-
-            prompt = build_llm_scoring_prompt(
-                project_context=project_context,
-                project_names=project_names,
-                payload_items=payload_items,
-                output_language=output_language,
-                relevance_mode=relevance_mode,
-                min_score=min_score,
-            )
-            llm_json = call_llm_json(config, prompt, temperature=0.15)
-            raw_items = llm_json.get("items", []) if isinstance(llm_json, dict) else []
-            for item in raw_items:
-                if not isinstance(item, dict):
-                    continue
-                paper_id = clean_text(str(item.get("id", "")))
-                paper = by_id.get(paper_id)
-                if not paper:
-                    continue
-                try:
-                    score = float(item.get("relevance_score", 0))
-                except (TypeError, ValueError):
-                    score = 0.0
-                evidence_spans: List[str] = []
-                evidence_raw = item.get("evidence_spans", [])
-                if isinstance(evidence_raw, list):
-                    for span in evidence_raw[:3]:
-                        text = clean_text(str(span))
-                        if text:
-                            evidence_spans.append(text[:220])
-                elif isinstance(evidence_raw, str):
-                    for span in re.split(r"[\n;]+", evidence_raw):
-                        text = clean_text(span)
-                        if text:
-                            evidence_spans.append(text[:220])
-                        if len(evidence_spans) >= 3:
-                            break
-                if score >= 7.0 and not evidence_spans:
-                    score = 5.5
-                paper.score = max(0.0, min(10.0, score))
-                paper.llm_relevance_text = clean_text(
-                    str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
-                )
-                paper.llm_core_point_text = clean_text(
-                    str(item.get("core_point", item.get("core_point_ko", "")))
-                )
-                paper.llm_usefulness_text = clean_text(
-                    str(item.get("usefulness", item.get("usefulness_ko", "")))
-                )
-                paper.llm_evidence_spans = evidence_spans
-                project_name = clean_text(str(item.get("project_name", "")))
-                if project_name:
-                    canonical_name = project_name_lookup.get(project_name.lower())
-                    if canonical_name:
-                        paper.project_name = canonical_name
+    prompt = build_llm_scoring_prompt(
+        project_context=project_context,
+        project_names=project_names,
+        payload_items=payload_items,
+        output_language=output_language,
+        search_request=search_request,
+    )
+    llm_json = call_llm_json(config, prompt, temperature=0.15)
+    raw_items = llm_json.get("items", []) if isinstance(llm_json, dict) else []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        paper_id = clean_text(str(item.get("id", "")))
+        paper = by_id.get(paper_id)
+        if not paper:
+            continue
+        try:
+            score = float(item.get("relevance_score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
+        evidence_spans: List[str] = []
+        evidence_raw = item.get("evidence_spans", [])
+        if isinstance(evidence_raw, list):
+            for span in evidence_raw[:3]:
+                text = clean_text(str(span))
+                if text:
+                    evidence_spans.append(text[:220])
+        elif isinstance(evidence_raw, str):
+            for span in re.split(r"[\n;]+", evidence_raw):
+                text = clean_text(span)
+                if text:
+                    evidence_spans.append(text[:220])
+                if len(evidence_spans) >= 3:
+                    break
+        if score >= 7.0 and not evidence_spans:
+            score = 5.5
+        paper.score = max(0.0, min(10.0, score))
+        paper.llm_relevance_text = clean_text(
+            str(item.get("relevance_reason", item.get("relevance_reason_ko", "")))
+        )
+        paper.llm_core_point_text = clean_text(
+            str(item.get("core_point", item.get("core_point_ko", "")))
+        )
+        paper.llm_usefulness_text = clean_text(
+            str(item.get("usefulness", item.get("usefulness_ko", "")))
+        )
+        paper.llm_evidence_spans = evidence_spans
+        project_name = clean_text(str(item.get("project_name", "")))
+        if project_name:
+            canonical_name = project_name_lookup.get(project_name.lower())
+            if canonical_name:
+                paper.project_name = canonical_name
 
     selected = [paper for paper in papers if paper.score >= paper.relevance_threshold]
     selected.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
     scored_values = [paper.score for paper in papers]
     metadata = {
-        "mode": "llm",
+        "mode": "llm_listwise",
         "threshold": min((paper.relevance_threshold for paper in papers), default=config.llm_relevance_threshold),
         "scoring_candidates": len(papers),
         "scored_count": len([value for value in scored_values if value > 0]),
@@ -2158,20 +2516,16 @@ def annotate_papers_with_llm(
 
 
 def rank_relevant_papers_keyword(
-    papers: List[Paper], config: AppConfig
+    papers: List[Paper],
+    config: AppConfig,
+    search_request: SearchRequest,
+    now_utc: datetime,
 ) -> Tuple[List[Paper], Dict[str, Any]]:
-    scored: List[Paper] = []
-    ranked: List[Paper] = []
-    for paper in papers:
-        apply_topic_metadata_to_paper(paper, config)
-        scored.append(paper)
-        if paper.score < config.min_relevance_score:
-            continue
-        ranked.append(paper)
-    ranked.sort(key=lambda item: (item.score, item.published_at_utc), reverse=True)
+    scored = prioritize_candidates_for_search(papers, config, search_request, now_utc)
+    ranked = [paper for paper in scored if paper.score >= config.min_relevance_score]
     scored_values = [paper.score for paper in scored]
     metadata = {
-        "mode": "keyword",
+        "mode": "keyword_search",
         "threshold": config.min_relevance_score,
         "scoring_candidates": len(scored),
         "scored_count": len(scored),
@@ -2186,7 +2540,12 @@ def rank_relevant_papers_keyword(
     return ranked, metadata
 
 
-def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[Paper], Dict[str, Any]]:
+def rank_relevant_papers(
+    papers: List[Paper],
+    config: AppConfig,
+    search_request: SearchRequest,
+    now_utc: datetime,
+) -> Tuple[List[Paper], Dict[str, Any]]:
     if not papers:
         return (
             [],
@@ -2204,12 +2563,18 @@ def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[P
         )
     if config.enable_llm_agent and has_llm_provider(config):
         try:
-            candidates = prefilter_candidates_for_llm(papers, config)
-            llm_ranked, llm_meta = annotate_papers_with_llm(candidates, config)
+            candidates = prioritize_candidates_for_search(papers, config, search_request, now_utc)
+            candidates = candidates[: max(1, config.llm_max_candidates)]
+            llm_ranked, llm_meta = annotate_papers_with_llm(candidates, config, search_request)
             if llm_ranked:
                 return llm_ranked, llm_meta
             logging.warning("LLM ranking returned no papers. Falling back to keyword ranking.")
-            keyword_ranked, keyword_meta = rank_relevant_papers_keyword(papers, config)
+            keyword_ranked, keyword_meta = rank_relevant_papers_keyword(
+                papers,
+                config,
+                search_request,
+                now_utc,
+            )
             keyword_meta["llm_fallback_reason"] = "llm_returned_no_pass"
             keyword_meta["llm_threshold"] = config.llm_relevance_threshold
             keyword_meta["llm_score_buckets"] = llm_meta.get("score_buckets", {})
@@ -2221,10 +2586,15 @@ def rank_relevant_papers(papers: List[Paper], config: AppConfig) -> Tuple[List[P
         except Exception as exc:
             safe_error = mask_sensitive_text(str(exc))
             logging.warning("LLM ranking failed. Falling back to keyword ranking: %s", safe_error)
-            keyword_ranked, keyword_meta = rank_relevant_papers_keyword(papers, config)
+            keyword_ranked, keyword_meta = rank_relevant_papers_keyword(
+                papers,
+                config,
+                search_request,
+                now_utc,
+            )
             keyword_meta["llm_fallback_reason"] = f"llm_error: {safe_error}"
             return keyword_ranked, keyword_meta
-    return rank_relevant_papers_keyword(papers, config)
+    return rank_relevant_papers_keyword(papers, config, search_request, now_utc)
 
 def format_authors(authors: List[str], limit: int = 4) -> str:
     if not authors:
@@ -2257,6 +2627,10 @@ def format_score_buckets_text(buckets: Dict[str, int]) -> str:
 
 def build_diagnostics_lines(stats: DigestStats) -> List[str]:
     lines = [
+        f"Search intent: {stats.search_intent_label}",
+        f"Requested horizon: {stats.requested_time_horizon_label}",
+        f"Window used: {stats.window_used_label or stats.requested_time_horizon_label}",
+        f"Query plan: {stats.query_plan_label or 'N/A'}",
         (
             f"Collected candidates: arXiv {stats.arxiv_candidates}, PubMed {stats.pubmed_candidates}, "
             f"SemanticScholar {stats.semantic_scholar_candidates}, "
@@ -2269,6 +2643,8 @@ def build_diagnostics_lines(stats: DigestStats) -> List[str]:
         f"Send cadence: {stats.send_frequency}",
         f"Lookback window: last {stats.lookback_hours}h",
     ]
+    if stats.search_notice:
+        lines.append("Search note: " + stats.search_notice)
     if not stats.llm_agent_enabled:
         lines.append("LLM ranking: disabled (ENABLE_LLM_AGENT=false)")
     elif not stats.llm_provider_ready:
@@ -2366,6 +2742,11 @@ def compose_email_html(
     ui = email_ui_labels(output_language)
     now_local = format_local_time(now_utc, timezone_name)
     since_local = format_local_time(since_utc, timezone_name)
+    search_intent_text = stats.search_intent_label if stats else "Search"
+    requested_horizon_text = stats.requested_time_horizon_label if stats else "Custom"
+    window_used_text = stats.window_used_label if stats and stats.window_used_label else requested_horizon_text
+    query_plan_text = stats.query_plan_label if stats and stats.query_plan_label else "N/A"
+    search_notice = stats.search_notice if stats and stats.search_notice else ""
 
     diagnostics_html = ""
     if stats:
@@ -2410,12 +2791,40 @@ def compose_email_html(
             source_labels.append(label)
     source_summary = " | ".join(source_labels) if source_labels else "N/A"
     window_text = f"{since_local} ~ {now_local}"
+    notice_html = ""
+    if search_notice:
+        notice_html = f"""
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border-left:3px solid #6a9fd8;background:#f2f6fb;border-radius:7px;">
+          <tr>
+            <td style="padding:10px 12px;">
+              <div style="font-size:10px;letter-spacing:0.8px;text-transform:uppercase;font-weight:700;color:#4a7fb5;">Search note</div>
+              <div style="margin-top:4px;font-size:13px;line-height:1.6;color:#5a5a5a;">{html.escape(search_notice)}</div>
+            </td>
+          </tr>
+        </table>
+        """
     header_html = f"""
                 <tr>
                   <td style="padding:30px 28px 24px;background:linear-gradient(135deg,#1a2f23 0%,#2d5a3d 60%,#3a7a52 100%);color:#ffffff;">
                     <div style="font-size:24px;font-weight:700;line-height:1.2;">Paper Morning</div>
-                    <div style="margin-top:6px;font-size:14px;color:#d7e7dd;">Your Daily Paper Digest</div>
+                    <div style="margin-top:6px;font-size:14px;color:#d7e7dd;">Research-context paper search result</div>
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Intent</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(search_intent_text)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Requested horizon</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(requested_horizon_text)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Window used</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(window_used_text)}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Query plan</td>
+                        <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(query_plan_text)}</td>
+                      </tr>
                       <tr>
                         <td style="font-size:12px;color:#a8c4b4;padding:0 10px 6px 0;white-space:nowrap;">Window</td>
                         <td style="font-size:12px;color:#f4fbf7;padding:0 0 6px 0;">{html.escape(window_text)}</td>
@@ -2457,18 +2866,19 @@ def compose_email_html(
                           </tr>
                         </table>
                         <div style="padding:18px 4px 4px;font-size:14px;color:#5a5a5a;">
-                          No highly relevant papers were found in the last {int((now_utc - since_utc).total_seconds() / 3600)} hours.
+                          {html.escape(search_notice or f'No sufficiently relevant papers were found for {search_intent_text.lower()} in {requested_horizon_text.lower()}.')}
                         </div>
+                        {notice_html}
                         {diagnostics_html}
                       </td>
                     </tr>
                     <tr>
                       <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
-                        <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
-                          Generated by Paper Morning v0.5.2 | Manage topics in web UI
-                        </div>
-                      </td>
-                    </tr>
+                    <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
+                          Generated by Paper Morning | Search-first local result
+                    </div>
+                  </td>
+                </tr>
                   </table>
                 </td>
               </tr>
@@ -2628,6 +3038,7 @@ def compose_email_html(
 
                 <tr>
                   <td style="padding:0 22px 6px;">
+                    {notice_html}
                     {''.join(sections)}
                     {diagnostics_html}
                   </td>
@@ -2636,7 +3047,7 @@ def compose_email_html(
                 <tr>
                   <td style="padding:16px 22px 20px;border-top:1px solid #e5e3de;background:#ffffff;">
                     <div style="font-size:11px;line-height:1.6;color:#8a8a8a;text-align:center;">
-                      Generated by Paper Morning v0.5.2 | Manage topics in web UI
+                      Generated by Paper Morning | Search-first local result
                     </div>
                   </td>
                 </tr>
@@ -2658,14 +3069,22 @@ def compose_email_text(
     stats: DigestStats | None = None,
 ) -> str:
     ui = email_ui_labels(output_language)
+    search_intent_text = stats.search_intent_label if stats else "Search"
+    requested_horizon_text = stats.requested_time_horizon_label if stats else "Custom"
+    window_used_text = stats.window_used_label if stats and stats.window_used_label else requested_horizon_text
     lines = [
-        "Daily Paper Digest",
+        "Paper Morning Search Result",
+        f"Intent: {search_intent_text}",
+        f"Requested horizon: {requested_horizon_text}",
+        f"Window used: {window_used_text}",
         f"Window: {format_local_time(since_utc, timezone_name)} ~ {format_local_time(now_utc, timezone_name)}",
-        f"Total sent: {len(papers)}",
+        f"Total selected: {len(papers)}",
         "",
     ]
     if not papers:
-        lines.append("No highly relevant papers found in the last lookback window.")
+        lines.append(
+            stats.search_notice if stats and stats.search_notice else "No sufficiently relevant papers were found."
+        )
         if stats:
             lines.append("")
             lines.append("[Selection Diagnostics]")
@@ -2728,234 +3147,172 @@ def send_email(config: AppConfig, subject: str, html_body: str, text_body: str) 
 def collect_and_rank_papers(
     config: AppConfig,
     now_utc: datetime,
+    search_request: SearchRequest,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> Tuple[List[Paper], DigestStats]:
     llm_provider_ready = has_llm_provider(config)
     stats = DigestStats(
         ranking_threshold=config.min_relevance_score,
         send_frequency=config.send_frequency,
-        lookback_hours=config.lookback_hours,
+        lookback_hours=search_request.time_horizon_hours,
         llm_max_candidates_base=config.llm_max_candidates_base,
         llm_max_candidates_effective=config.llm_max_candidates,
         llm_agent_enabled=config.enable_llm_agent,
         llm_provider_ready=llm_provider_ready,
+        search_intent=search_request.intent,
+        search_intent_label=search_request.intent_label,
+        requested_time_horizon_key=search_request.time_horizon_key,
+        requested_time_horizon_label=search_request.time_horizon_label,
     )
-    since_utc = now_utc - timedelta(hours=config.lookback_hours)
-    configured_arxiv_queries = dedupe_list(list(config.arxiv_queries))[: config.max_search_queries_per_source]
-    configured_pubmed_queries = dedupe_list(list(config.pubmed_queries))[: config.max_search_queries_per_source]
-    configured_semantic_queries = dedupe_list(list(config.semantic_scholar_queries))[
-        : config.max_search_queries_per_source
-    ]
-    configured_google_scholar_queries = dedupe_list(list(config.google_scholar_queries))[
-        : config.max_search_queries_per_source
-    ]
-    arxiv_queries = list(configured_arxiv_queries)
-    pubmed_queries = list(configured_pubmed_queries)
-    semantic_queries = list(configured_semantic_queries)
-    google_scholar_queries = list(configured_google_scholar_queries)
-    stats.query_strategy = "saved-topics"
     if config.enable_llm_agent and llm_provider_ready:
-        stats.estimated_llm_calls_upper_bound = 1 + (
-            (max(1, config.llm_max_candidates) - 1) // max(1, config.llm_batch_size)
-        )
+        stats.estimated_llm_calls_upper_bound = 1
         stats.ranking_threshold = config.llm_relevance_threshold
 
-    emit_progress(progress_callback, "Preparing search queries...", 10)
-    has_active_query = bool(arxiv_queries or pubmed_queries)
-    if config.enable_semantic_scholar and semantic_queries:
-        has_active_query = True
-    if config.enable_google_scholar and google_scholar_queries:
-        has_active_query = True
+    plans = build_search_query_plans(config)
+    has_active_query = any(
+        any(plan[key] for key in ("arxiv_queries", "pubmed_queries", "semantic_queries", "google_queries"))
+        for plan in plans
+    )
     if not has_active_query:
         raise ValueError(
             "Search query is empty. In Topic Editor, run 'Keyword / Query Generation' "
             "or manually fill arXiv/PubMed/Semantic Scholar/Google Scholar queries, then save topics."
         )
 
-    def fetch_from_sources(
-        selected_arxiv_queries: List[str],
-        selected_pubmed_queries: List[str],
-        selected_semantic_queries: List[str],
-        selected_google_scholar_queries: List[str],
-    ) -> Tuple[List[Paper], int, int, int, int]:
+    retrieval_settings = build_search_retrieval_settings(search_request)
+    reldate_days = max(1, int(search_request.time_horizon_hours / 24) + 1)
+    stats.query_strategy = f"{search_request.intent}-saved-topics"
+    emit_progress(progress_callback, "Preparing search queries...", 10)
+
+    def fetch_from_plan(plan: Dict[str, List[str] | str]) -> Tuple[List[Paper], int, int, int, int]:
+        since_utc = now_utc - timedelta(hours=search_request.time_horizon_hours)
         papers_acc: List[Paper] = []
         arxiv_papers_local: List[Paper] = []
         pubmed_papers_local: List[Paper] = []
         semantic_papers_local: List[Paper] = []
         google_scholar_papers_local: List[Paper] = []
-        if selected_arxiv_queries:
-            emit_progress(progress_callback, "Fetching papers from arXiv...", 35)
-            logging.info("Fetching papers from arXiv...")
-            arxiv_papers_local = fetch_arxiv_papers(config, since_utc, selected_arxiv_queries)
-            logging.info("arXiv candidates: %d", len(arxiv_papers_local))
-            papers_acc.extend(arxiv_papers_local)
-        else:
-            logging.info("Skipping arXiv search: no configured arXiv query.")
+        arxiv_queries = list(plan.get("arxiv_queries", []))
+        pubmed_queries = list(plan.get("pubmed_queries", []))
+        semantic_queries = list(plan.get("semantic_queries", []))
+        google_queries = list(plan.get("google_queries", []))
 
-        if selected_pubmed_queries:
-            emit_progress(progress_callback, "Fetching papers from PubMed...", 55)
-            logging.info("Fetching papers from PubMed...")
-            pubmed_papers_local = fetch_pubmed_papers(config, since_utc, selected_pubmed_queries)
-            logging.info("PubMed candidates: %d", len(pubmed_papers_local))
+        if arxiv_queries:
+            emit_progress(progress_callback, "Fetching papers from arXiv...", 30)
+            arxiv_papers_local = fetch_arxiv_papers(
+                config,
+                since_utc,
+                arxiv_queries,
+                sort_by=str(retrieval_settings["arxiv_sort"]),
+                max_results_override=int(retrieval_settings["arxiv_max_results"]),
+            )
+            papers_acc.extend(arxiv_papers_local)
+        if pubmed_queries:
+            emit_progress(progress_callback, "Fetching papers from PubMed...", 45)
+            pubmed_papers_local = fetch_pubmed_papers(
+                config,
+                since_utc,
+                pubmed_queries,
+                sort=str(retrieval_settings["pubmed_sort"]),
+                reldate_days=reldate_days,
+                max_results_override=int(retrieval_settings["pubmed_max_results"]),
+            )
             papers_acc.extend(pubmed_papers_local)
-        else:
-            logging.info("Skipping PubMed search: no configured PubMed query.")
-        if config.enable_semantic_scholar and selected_semantic_queries:
-            emit_progress(progress_callback, "Fetching papers from Semantic Scholar...", 65)
-            logging.info("Fetching papers from Semantic Scholar...")
+        if config.enable_semantic_scholar and semantic_queries:
+            emit_progress(progress_callback, "Fetching papers from Semantic Scholar...", 58)
             semantic_papers_local = fetch_semantic_scholar_papers(
                 config,
                 since_utc,
-                selected_semantic_queries,
+                semantic_queries,
+                max_results_override=int(retrieval_settings["semantic_max_results"]),
             )
-            logging.info("Semantic Scholar candidates: %d", len(semantic_papers_local))
             papers_acc.extend(semantic_papers_local)
-        elif not config.enable_semantic_scholar:
-            logging.info("Skipping Semantic Scholar search: disabled by ENABLE_SEMANTIC_SCHOLAR.")
-        else:
-            logging.info("Skipping Semantic Scholar search: no configured query.")
-        if config.enable_google_scholar and selected_google_scholar_queries:
-            emit_progress(progress_callback, "Fetching papers from Google Scholar...", 70)
-            logging.info("Fetching papers from Google Scholar...")
+        if config.enable_google_scholar and google_queries:
+            emit_progress(progress_callback, "Fetching papers from Google Scholar...", 66)
             google_scholar_papers_local = fetch_google_scholar_papers(
                 config,
                 since_utc,
                 now_utc,
-                selected_google_scholar_queries,
+                google_queries,
+                max_results_override=int(retrieval_settings["google_scholar_max_results"]),
             )
-            logging.info("Google Scholar candidates: %d", len(google_scholar_papers_local))
             papers_acc.extend(google_scholar_papers_local)
-        elif not config.enable_google_scholar:
-            logging.info("Skipping Google Scholar search: disabled by ENABLE_GOOGLE_SCHOLAR.")
-        else:
-            logging.info("Skipping Google Scholar search: no configured query.")
         return (
-            papers_acc,
+            dedupe_papers_by_title(papers_acc),
             len(arxiv_papers_local),
             len(pubmed_papers_local),
             len(semantic_papers_local),
             len(google_scholar_papers_local),
         )
 
-    def apply_source_counts(
-        arxiv_count_value: int,
-        pubmed_count_value: int,
-        semantic_count_value: int,
-        google_scholar_count_value: int,
-        total_count: int,
-    ) -> None:
-        stats.arxiv_candidates = arxiv_count_value
-        stats.pubmed_candidates = pubmed_count_value
-        stats.semantic_scholar_candidates = semantic_count_value
-        stats.google_scholar_candidates = google_scholar_count_value
-        stats.total_candidates = total_count
-
-    all_papers, arxiv_count, pubmed_count, semantic_count, google_scholar_count = fetch_from_sources(
-        arxiv_queries,
-        pubmed_queries,
-        semantic_queries,
-        google_scholar_queries,
-    )
-    apply_source_counts(arxiv_count, pubmed_count, semantic_count, google_scholar_count, len(all_papers))
-
+    selected_candidates: List[Paper] = []
+    selected_plan_label = ""
     recovery_steps: List[str] = []
-    if not all_papers:
-        stats.query_strategy = "saved-topics-zero-hit"
-        recovery_steps.append("Initial search returned zero papers. Starting automatic recovery.")
+    last_total_candidates = 0
+    for index, plan in enumerate(plans, start=1):
+        label = str(plan.get("label", f"plan-{index}"))
+        recovery_steps.append(f"Trying {label}.")
+        plan_papers, arxiv_count, pubmed_count, semantic_count, google_count = fetch_from_plan(plan)
+        stats.arxiv_candidates = arxiv_count
+        stats.pubmed_candidates = pubmed_count
+        stats.semantic_scholar_candidates = semantic_count
+        stats.google_scholar_candidates = google_count
+        stats.total_candidates = len(plan_papers)
+        last_total_candidates = len(plan_papers)
+        if not plan_papers:
+            recovery_steps.append(f"{label}: no candidates retrieved.")
+            continue
 
-        for attempt in range(1, ZERO_RESULT_RETRY_ATTEMPTS + 1):
-            sleep_seconds = ZERO_RESULT_RETRY_SLEEP_SECONDS * attempt
-            recovery_steps.append(
-                f"Retry with same queries {attempt}/{ZERO_RESULT_RETRY_ATTEMPTS} "
-                f"(wait {sleep_seconds:.0f}s)"
-            )
-            time.sleep(sleep_seconds)
-            retry_papers, ra, rp, rs, rg = fetch_from_sources(
-                arxiv_queries,
-                pubmed_queries,
-                semantic_queries,
-                google_scholar_queries,
-            )
-            if retry_papers:
-                all_papers = retry_papers
-                apply_source_counts(ra, rp, rs, rg, len(all_papers))
-                stats.query_strategy = f"saved-topics-retry-{attempt}"
-                recovery_steps.append(f"Retry succeeded: total {len(all_papers)}")
-                break
-            recovery_steps.append("Retry result: 0")
-
-    if not all_papers:
-        project_terms: List[str] = []
-        for project in config.research_projects:
-            project_terms.extend(extract_query_terms(f"{project.name} {project.context}"))
-        project_terms = dedupe_list(project_terms)
-        relaxed_arxiv = (
-            build_relaxed_queries_for_source(arxiv_queries, "arxiv", project_terms)
-            if arxiv_queries
-            else []
-        )
-        relaxed_pubmed = (
-            build_relaxed_queries_for_source(pubmed_queries, "pubmed", project_terms)
-            if pubmed_queries
-            else []
-        )
-        relaxed_semantic = (
-            build_relaxed_queries_for_source(semantic_queries, "semantic", project_terms)
-            if (config.enable_semantic_scholar and semantic_queries)
-            else []
-        )
-        relaxed_google_scholar = (
-            build_relaxed_queries_for_source(google_scholar_queries, "google", project_terms)
-            if (config.enable_google_scholar and google_scholar_queries)
-            else []
-        )
-        if relaxed_arxiv or relaxed_pubmed or relaxed_semantic or relaxed_google_scholar:
-            recovery_steps.append("Running relaxed-query recovery.")
-            retry_papers, ra, rp, rs, rg = fetch_from_sources(
-                relaxed_arxiv,
-                relaxed_pubmed,
-                relaxed_semantic,
-                relaxed_google_scholar,
-            )
-            if retry_papers:
-                all_papers = retry_papers
-                apply_source_counts(ra, rp, rs, rg, len(all_papers))
-                stats.query_strategy = "relaxed-query-retry"
-                recovery_steps.append(f"Relaxed-query recovery succeeded: total {len(all_papers)}")
-            else:
-                recovery_steps.append("Relaxed-query recovery result: 0")
-
-    if not all_papers:
-        try:
-            rescue_arxiv, rescue_pubmed, rescue_semantic, rescue_google = generate_rescue_queries_with_llm(config)
-            if rescue_arxiv or rescue_pubmed or rescue_semantic or rescue_google:
-                recovery_steps.append("Running LLM-generated rescue queries.")
-                retry_papers, ra, rp, rs, rg = fetch_from_sources(
-                    rescue_arxiv,
-                    rescue_pubmed,
-                    rescue_semantic,
-                    rescue_google,
+        if search_request.intent == "whats_new":
+            for window_key, window_hours in build_whats_new_horizon_steps(search_request):
+                filtered = filter_papers_by_horizon(plan_papers, now_utc, window_hours)
+                recovery_steps.append(
+                    f"{label}: {len(filtered)} candidates inside {time_horizon_label(window_key, search_request.intent)}."
                 )
-                if retry_papers:
-                    all_papers = retry_papers
-                    apply_source_counts(ra, rp, rs, rg, len(all_papers))
-                    stats.query_strategy = "llm-rescue-query"
-                    recovery_steps.append(f"LLM rescue succeeded: total {len(all_papers)}")
-                else:
-                    recovery_steps.append("LLM rescue result: 0")
-            else:
-                recovery_steps.append("LLM did not produce rescue queries.")
-        except Exception as exc:
-            recovery_steps.append(f"LLM rescue failed: {mask_sensitive_text(str(exc))}")
+                if filtered:
+                    selected_candidates = filtered
+                    selected_plan_label = label
+                    stats.window_used_hours = window_hours
+                    stats.window_used_label = time_horizon_label(window_key, search_request.intent)
+                    break
+            if selected_candidates:
+                break
+        else:
+            filtered = filter_papers_by_horizon(plan_papers, now_utc, search_request.time_horizon_hours)
+            recovery_steps.append(
+                f"{label}: {len(filtered)} candidates inside {search_request.time_horizon_label}."
+            )
+            if filtered:
+                selected_candidates = filtered
+                selected_plan_label = label
+                stats.window_used_hours = search_request.time_horizon_hours
+                stats.window_used_label = search_request.time_horizon_label
+                break
 
-    if not all_papers and recovery_steps:
-        stats.query_strategy = "recovery-failed"
     stats.zero_candidate_recovery_steps = recovery_steps
+    stats.query_plan_label = selected_plan_label or (str(plans[-1].get("label", "")) if plans else "")
+    if not stats.window_used_label:
+        stats.window_used_hours = search_request.time_horizon_hours
+        stats.window_used_label = search_request.time_horizon_label
+    if not selected_candidates:
+        stats.query_strategy = f"{search_request.intent}-no-results"
+        stats.post_time_filter_candidates = 0
+        stats.no_results_reason = "outside_horizon" if last_total_candidates > 0 else "none_retrieved"
+        if stats.no_results_reason == "outside_horizon":
+            stats.search_notice = (
+                f"Candidates were retrieved, but none stayed inside {search_request.time_horizon_label}. "
+                "Try a broader time horizon or use Discovery mode."
+            )
+        else:
+            stats.search_notice = (
+                f"No papers were found within {search_request.time_horizon_label}. "
+                "Try a broader time horizon, Discovery mode, or revise your project context."
+            )
+        return [], stats
 
     emit_progress(progress_callback, "Ranking relevant papers...", 75)
-    all_papers = [paper for paper in all_papers if paper.published_at_utc <= now_utc]
-    stats.post_time_filter_candidates = len(all_papers)
-    ranked, rank_meta = rank_relevant_papers(all_papers, config)
+    selected_candidates = [paper for paper in selected_candidates if paper.published_at_utc <= now_utc]
+    stats.post_time_filter_candidates = len(selected_candidates)
+    ranked, rank_meta = rank_relevant_papers(selected_candidates, config, search_request, now_utc)
     stats.ranking_mode = str(rank_meta.get("mode", "keyword"))
     stats.ranking_threshold = float(rank_meta.get("threshold", stats.ranking_threshold or 0.0))
     stats.scoring_candidates = int(rank_meta.get("scoring_candidates", 0))
@@ -2983,6 +3340,11 @@ def collect_and_rank_papers(
             stats.llm_fallback_scored_examples = [
                 clean_text(str(item)) for item in llm_examples if clean_text(str(item))
             ]
+    stats.query_strategy = f"{search_request.intent}-{selected_plan_label or 'saved-topics'}"
+    stats.search_notice = (
+        f"{search_request.intent_label} searched {stats.window_used_label or search_request.time_horizon_label} "
+        f"using {selected_plan_label or 'saved topic queries'}."
+    )
     logging.info("Relevant papers selected: %d", len(ranked))
     emit_progress(progress_callback, "Paper ranking completed.", 90)
     return ranked, stats
@@ -2994,11 +3356,18 @@ def run_digest(
     force_send: bool = False,
     print_dry_run_output: bool = True,
     respect_schedule_policy: bool = False,
+    search_intent: str | None = None,
+    time_horizon_key: str | None = None,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> str:
     preview_only_mode = dry_run or not delivery_requires_email(config.delivery_mode)
-    emit_progress(progress_callback, "Starting digest job...", 5)
+    emit_progress(progress_callback, "Starting search job...", 5)
     now_utc = datetime.now(timezone.utc)
+    search_request = resolve_search_request(
+        config,
+        search_intent=search_intent,
+        time_horizon_key=time_horizon_key,
+    )
     local_send_date: date | None = None
     if respect_schedule_policy and not force_send:
         should_send_today, next_due_date = evaluate_send_cadence(config, now_utc)
@@ -3016,10 +3385,10 @@ def run_digest(
             logging.info(skipped_message)
             emit_progress(progress_callback, "Skipped by local send-time window.", 100)
             return skipped_message
-    since_utc = now_utc - timedelta(hours=config.lookback_hours)
     ranked_papers, stats = collect_and_rank_papers(
         config,
         now_utc,
+        search_request,
         progress_callback=progress_callback,
     )
     ranked_papers, cadence_summary, cadence_filtered_out = apply_project_cadence_filter(
@@ -3037,8 +3406,12 @@ def run_digest(
     papers = papers_after_duplicate_filter[: max(1, config.max_papers)]
     stats.duplicates_filtered = duplicates_filtered
     stats.final_selected = len(papers)
+    since_utc = now_utc - timedelta(hours=max(1, stats.window_used_hours or search_request.time_horizon_hours))
     emit_progress(progress_callback, "Composing email body...", 95)
-    subject = f"[Paper Digest] {len(papers)} relevant papers ({now_utc.astimezone(config.timezone):%Y-%m-%d})"
+    subject = (
+        f"[Paper Morning] {search_request.intent_label} | "
+        f"{len(papers)} papers ({now_utc.astimezone(config.timezone):%Y-%m-%d})"
+    )
     html_body = compose_email_html(
         papers,
         now_utc,
@@ -3062,6 +3435,15 @@ def run_digest(
         "delivery_mode": config.delivery_mode,
         "send_frequency": config.send_frequency,
         "output_language": config.output_language,
+        "content_kind": "search_result",
+        "search_intent": search_request.intent,
+        "search_intent_label": search_request.intent_label,
+        "requested_time_horizon_key": search_request.time_horizon_key,
+        "requested_time_horizon_label": search_request.time_horizon_label,
+        "window_used_hours": stats.window_used_hours,
+        "window_used_label": stats.window_used_label,
+        "query_plan_label": stats.query_plan_label,
+        "notice": stats.search_notice,
         "paper_count": len(papers),
         "papers": [
             {
@@ -3546,6 +3928,13 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     send_hour = read_int_env("SEND_HOUR", 9)
     send_minute = read_int_env("SEND_MINUTE", 0)
     send_time_window_minutes = max(1, read_int_env("SEND_TIME_WINDOW_MINUTES", 15))
+    search_intent_default = normalize_search_intent(
+        os.getenv("SEARCH_INTENT_DEFAULT", SEARCH_INTENT_DEFAULT)
+    )
+    search_time_horizon_default = normalize_time_horizon_key(
+        os.getenv("SEARCH_TIME_HORIZON_DEFAULT", SEARCH_TIME_HORIZON_DEFAULT),
+        search_intent_default,
+    )
     max_papers = max(1, read_int_env("MAX_PAPERS", 5))
     lookback_hours = max(1, read_int_env("LOOKBACK_HOURS", 24))
     min_lookback_hours = send_interval_days * 24
@@ -3653,6 +4042,8 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         send_hour=send_hour,
         send_minute=send_minute,
         send_time_window_minutes=send_time_window_minutes,
+        search_intent_default=search_intent_default,
+        search_time_horizon_default=search_time_horizon_default,
         max_papers=max_papers,
         lookback_hours=lookback_hours,
         min_relevance_score=min_relevance_score,
@@ -3693,17 +4084,17 @@ def load_config(require_email_credentials: bool) -> AppConfig:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Daily paper digest sender for medical AI research interests."
+        description="Paper Morning research-context paper search runner."
     )
     parser.add_argument(
         "--run-once",
         action="store_true",
-        help="Run the digest job immediately and exit.",
+        help="Run the search job immediately and exit.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Do not send email. Print digest output to console.",
+        help="Do not send email. Print the generated result to console.",
     )
     return parser.parse_args()
 

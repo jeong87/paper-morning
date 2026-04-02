@@ -50,7 +50,7 @@ def open_browser_when_ready(host: str, port: int, delay_seconds: float = 15.0) -
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="One-click local launcher for Paper Digest web console."
+        description="One-click local launcher for Paper Morning search console."
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5050)

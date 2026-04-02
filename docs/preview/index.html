@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Paper Morning Live Preview</title>
+  <title>Paper Morning Live Search</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -614,11 +614,11 @@
           <span class="brand-mark">PM</span>
           <span>Paper Morning</span>
         </div>
-        <div class="eyebrow">Live browser preview</div>
-        <h1>See what the digest email will actually look like.</h1>
+        <div class="eyebrow">Live browser search</div>
+        <h1>Search papers that actually fit your research context.</h1>
         <p class="lead">
           Describe your research focus, paste a Gemini API key, and Paper Morning will generate search
-          queries from your context, retrieve recent papers, rank them, and open the email-style HTML in a new tab.
+          queries from your context, retrieve papers, rank them, and open a result page in a new tab.
           No email is sent from this page.
         </p>
         <div class="hero-points">
@@ -631,8 +631,8 @@
             <span>The preview fetches live candidates from arXiv and PubMed before ranking.</span>
           </div>
           <div class="hero-point">
-            <strong>Mail-style output</strong>
-            <span>The result opens as the same kind of digest HTML you would review later.</span>
+            <strong>Search modes</strong>
+            <span>Switch between What&apos;s New, Best Match, and Discovery depending on your intent.</span>
           </div>
           <div class="hero-point">
             <strong>No install</strong>
@@ -655,7 +655,7 @@
           <div class="mail-shot">
             <div class="mail-header">
               <strong>Paper Morning</strong>
-              <span>Your paper digest, ranked against your project context.</span>
+              <span>Your search result page, ranked against your project context.</span>
             </div>
             <div class="mail-stats">
               <div><strong>42</strong><span>Scanned</span></div>
@@ -676,7 +676,7 @@
 
     <section class="layout">
       <div class="panel form-card">
-        <h2 class="section-title">Run a live preview</h2>
+        <h2 class="section-title">Run a live search</h2>
         <p class="section-copy">
           Use this page when you are arriving from GitHub and want to understand the product quickly.
           Your Gemini API key is used for this run only. The page stores only the last generated HTML in local browser storage
@@ -699,6 +699,24 @@
           <label for="keywords">Optional keywords</label>
           <input id="keywords" type="text" placeholder="e.g., endoscopy, weak supervision, temporal modeling, retrieval" />
           <small>Comma separated. These are merged into context-based query generation.</small>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="searchIntent">Search intent</label>
+            <select id="searchIntent">
+              <option value="best_match" selected>Best Match</option>
+              <option value="whats_new">What&apos;s New</option>
+              <option value="discovery">Discovery</option>
+            </select>
+            <small id="intentHint">Find the papers that fit your project best, even if they are not from this week.</small>
+          </div>
+
+          <div class="field">
+            <label for="timeHorizon">Time horizon</label>
+            <select id="timeHorizon"></select>
+            <small id="horizonHint">Default for Best Match is 1 year. Longer horizons search more broadly and may work better with stronger Gemini models.</small>
+          </div>
         </div>
 
         <div class="field-row">
@@ -736,12 +754,12 @@
         </div>
 
         <div class="cta-row">
-          <button class="button-primary" id="runBtn" type="button">Generate Live Email Preview</button>
-          <button class="button-secondary" id="openLastBtn" type="button">Open Last Preview</button>
+          <button class="button-primary" id="runBtn" type="button">Search Papers</button>
+          <button class="button-secondary" id="openLastBtn" type="button">Open Last Result</button>
           <a class="button-link" href="https://github.com/jeong87/paper-morning" target="_blank" rel="noopener noreferrer">Open Repository</a>
         </div>
 
-        <div id="status" class="status">Ready. Fill your context, paste a Gemini key, and run the preview.</div>
+        <div id="status" class="status">Ready. Fill your context, choose a search mode, paste a Gemini key, and run the search.</div>
       </div>
 
       <aside class="panel side-card">
@@ -752,33 +770,41 @@
             The page first asks Gemini to turn your project description into topic keywords plus arXiv and PubMed queries.
           </li>
           <li data-step="2">
-            <strong>Retrieve recent candidates</strong>
-            It starts with the last 7 days, then widens the live search window step by step up to 6 months if needed.
+            <strong>Retrieve candidates for your chosen search intent</strong>
+            What&apos;s New prefers recent work, while Best Match and Discovery search wider horizons for stronger context fit.
           </li>
           <li data-step="3">
             <strong>Rank the candidates with Gemini</strong>
-            The page then asks Gemini to score relevance and write the short digest explanations.
+            The page then asks Gemini to score relevance and write short explanations for why each paper matters.
           </li>
           <li data-step="4">
-            <strong>Open the email-style HTML in a new tab</strong>
-            You see the digest output immediately, but nothing is sent by email from this page.
+            <strong>Open the result page in a new tab</strong>
+            You see the ranked output immediately, but nothing is sent by email from this page.
           </li>
         </ol>
 
         <div class="scope-box">
-          <strong>Preview scope</strong>
-          <p>Fast but adaptive: 5 selected papers, real retrieval from arXiv and PubMed, search window starts at 7 days and expands up to 180 days, no email send.</p>
+          <strong>Live search scope</strong>
+          <p>Fast but adaptive: 5 selected papers, real retrieval from arXiv and PubMed, explicit intent and horizon controls, no email send.</p>
         </div>
 
         <p class="foot-note">
           Browser limitations mean this page focuses on the fastest no-install path. The local install can add more operational controls later,
-          but this preview should already make the product value clear.
+          but this live search should already make the product value clear.
         </p>
       </aside>
     </section>
   </div>
 
   <script>
+    const TIME_HORIZON_OPTIONS = {
+      "7d": { hours: 24 * 7, label: "7 days" },
+      "30d": { hours: 24 * 30, label: "30 days" },
+      "180d": { hours: 24 * 180, label: "180 days" },
+      "1y": { hours: 24 * 365, label: "1 year" },
+      "3y": { hours: 24 * 365 * 3, label: "3 years" },
+      "5y": { hours: 24 * 365 * 5, label: "5 years" },
+    };
     const LOOKBACK_STEPS = [
       { hours: 24 * 7, label: "last 7 days" },
       { hours: 24 * 14, label: "last 14 days" },
@@ -786,10 +812,48 @@
       { hours: 24 * 60, label: "last 60 days" },
       { hours: 24 * 90, label: "last 90 days" },
       { hours: 24 * 180, label: "last 180 days" },
+      { hours: 24 * 365, label: "last 1 year" },
     ];
-    const MAX_LOOKBACK_HOURS = LOOKBACK_STEPS[LOOKBACK_STEPS.length - 1].hours;
+    const SEARCH_INTENT_POLICIES = {
+      whats_new: {
+        label: "What's New",
+        description: "Find recent papers related to your context. Freshness comes first, then direct relevance.",
+        horizonOptions: ["7d", "30d", "180d", "1y"],
+        defaultHorizon: "30d",
+        retrievalMode: "adaptive_recent",
+        arxivSort: "submittedDate",
+        pubmedSort: "pub date",
+        arxivMaxResults: 60,
+        pubmedMaxResults: 80,
+        minScore: 6.0,
+      },
+      best_match: {
+        label: "Best Match",
+        description: "Find the papers that fit your project best, even if they are not from this week.",
+        horizonOptions: ["180d", "1y", "3y", "5y"],
+        defaultHorizon: "1y",
+        retrievalMode: "direct_horizon",
+        arxivSort: "relevance",
+        pubmedSort: "relevance",
+        arxivMaxResults: 90,
+        pubmedMaxResults: 110,
+        minScore: 6.0,
+      },
+      discovery: {
+        label: "Discovery",
+        description: "Broaden the search to adjacent but transferable methods, datasets, and task setups.",
+        horizonOptions: ["180d", "1y", "3y", "5y"],
+        defaultHorizon: "3y",
+        retrievalMode: "direct_horizon",
+        arxivSort: "relevance",
+        pubmedSort: "relevance",
+        arxivMaxResults: 110,
+        pubmedMaxResults: 140,
+        minScore: 5.5,
+      },
+    };
+    const MAX_LOOKBACK_HOURS = TIME_HORIZON_OPTIONS["5y"].hours;
     const FIXED_PAPER_COUNT = 5;
-    const LLM_MIN_SCORE = 6.0;
     const MODEL_FALLBACK_ORDER = [
       "gemini-3.1-pro",
       "gemini-3.1-flash",
@@ -802,6 +866,10 @@
     const runBtn = document.getElementById("runBtn");
     const openLastBtn = document.getElementById("openLastBtn");
     const statusEl = document.getElementById("status");
+    const searchIntentEl = document.getElementById("searchIntent");
+    const timeHorizonEl = document.getElementById("timeHorizon");
+    const intentHintEl = document.getElementById("intentHint");
+    const horizonHintEl = document.getElementById("horizonHint");
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -888,15 +956,76 @@
       }[lang] || "English";
     }
 
+    function getSearchIntentPolicy(intent) {
+      return SEARCH_INTENT_POLICIES[String(intent || "").trim()] || SEARCH_INTENT_POLICIES.best_match;
+    }
+
+    function getTimeHorizonConfig(key) {
+      return TIME_HORIZON_OPTIONS[String(key || "").trim()] || TIME_HORIZON_OPTIONS["1y"];
+    }
+
     function getModelFallbackChain(preferredModel) {
       return unique([preferredModel, ...MODEL_FALLBACK_ORDER]);
+    }
+
+    function formatTimeHorizonLabel(key) {
+      return getTimeHorizonConfig(key).label;
     }
 
     function lookbackLabel(hours) {
       const match = LOOKBACK_STEPS.find((step) => step.hours === hours);
       if (match) return match.label;
+      if (hours >= 24 * 365) {
+        const years = Math.round(hours / (24 * 365));
+        return years <= 1 ? "last 1 year" : `last ${years} years`;
+      }
       const days = Math.round(hours / 24);
-      return `last ${days} days`;
+      return days <= 1 ? "last 1 day" : `last ${days} days`;
+    }
+
+    function getAdaptiveLookbackSteps(maxHours) {
+      const allowed = LOOKBACK_STEPS.filter((step) => step.hours <= maxHours);
+      if (!allowed.length || allowed[allowed.length - 1].hours !== maxHours) {
+        allowed.push({ hours: maxHours, label: lookbackLabel(maxHours) });
+      }
+      return allowed;
+    }
+
+    function getRetrievalSettings(intent, horizonHours) {
+      const policy = getSearchIntentPolicy(intent);
+      const horizonBoost = horizonHours >= TIME_HORIZON_OPTIONS["5y"].hours
+        ? 1.35
+        : horizonHours >= TIME_HORIZON_OPTIONS["3y"].hours
+          ? 1.2
+          : horizonHours >= TIME_HORIZON_OPTIONS["1y"].hours
+            ? 1.1
+            : 1.0;
+      return {
+        arxivSort: policy.arxivSort,
+        pubmedSort: policy.pubmedSort,
+        arxivMaxResults: Math.min(140, Math.round(policy.arxivMaxResults * horizonBoost)),
+        pubmedMaxResults: Math.min(180, Math.round(policy.pubmedMaxResults * horizonBoost)),
+      };
+    }
+
+    function refreshTimeHorizonOptions(preserveSelection = true) {
+      const policy = getSearchIntentPolicy(searchIntentEl.value);
+      const current = preserveSelection ? timeHorizonEl.value : "";
+      timeHorizonEl.innerHTML = "";
+      for (const key of policy.horizonOptions) {
+        const option = document.createElement("option");
+        option.value = key;
+        option.textContent = formatTimeHorizonLabel(key);
+        if (key === current) {
+          option.selected = true;
+        }
+        timeHorizonEl.appendChild(option);
+      }
+      if (!timeHorizonEl.value) {
+        timeHorizonEl.value = policy.defaultHorizon;
+      }
+      intentHintEl.textContent = policy.description;
+      horizonHintEl.textContent = `Recommended for ${policy.label}: ${formatTimeHorizonLabel(policy.defaultHorizon)}. Longer horizons search more broadly and may work better with stronger Gemini models.`;
     }
 
     function classifyGeminiFailure(status, bodyText) {
@@ -1080,6 +1209,7 @@
         name: input.projectName,
         context: mergedContext,
       };
+      const intentPolicy = getSearchIntentPolicy(input.searchIntent);
       return `You are helping configure a medical AI paper alert assistant.
 For the single project below, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, semantic_scholar_query, google_scholar_query.
 Return ONLY JSON object with schema:
@@ -1097,8 +1227,9 @@ Return ONLY JSON object with schema:
 }
 Rules:
 - create exactly one topic for this project
+- search intent: ${intentPolicy.label}
 - keyword list length: 5..8
-- live preview needs retrievable recent papers, so balance precision with enough recall
+- live search needs retrievable papers, so balance precision with enough recall
 - keep arXiv and PubMed queries moderately broad and centered on 2-4 core concepts
 - arXiv query should use all: terms, but avoid long chains of narrow requirements
 - PubMed query should use boolean and quoted phrases where useful, but avoid overly specific filters
@@ -1106,6 +1237,9 @@ Rules:
 - Semantic Scholar query should be concise plain text
 - Google Scholar query should be concise plain text
 - if the project is niche, prefer one domain term plus one method/task term rather than stacking every detail
+- for What's New, preserve enough recall to surface recent work
+- for Best Match, favor direct fit to the project
+- for Discovery, allow one adjacent methodological angle if it improves retrieval breadth
 - keep response machine-parseable JSON only
 
 Project JSON:
@@ -1165,8 +1299,10 @@ ${JSON.stringify(project)}`;
       });
     }
 
-    async function fetchArxivCandidates(arxivQuery) {
-      const rawUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery)}&start=0&max_results=60&sortBy=submittedDate&sortOrder=descending`;
+    async function fetchArxivCandidates(arxivQuery, options = {}) {
+      const maxResults = Math.max(10, Number(options.maxResults || 60));
+      const sortBy = String(options.sortBy || "submittedDate").trim() || "submittedDate";
+      const rawUrl = `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery)}&start=0&max_results=${maxResults}&sortBy=${encodeURIComponent(sortBy)}&sortOrder=descending`;
       const proxyUrl = `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(rawUrl)}`;
       return parseArxivXml(await fetchText(proxyUrl, 35000));
     }
@@ -1190,11 +1326,13 @@ ${JSON.stringify(project)}`;
       return map;
     }
 
-    async function fetchPubMedCandidates(pubmedQuery) {
+    async function fetchPubMedCandidates(pubmedQuery, options = {}) {
+      const maxResults = Math.max(10, Number(options.maxResults || 80));
+      const sort = String(options.sort || "pub date").trim() || "pub date";
       const query = `(${pubmedQuery})`;
-      const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax=80&term=${encodeURIComponent(query)}`;
+      const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=${encodeURIComponent(sort)}&retmax=${maxResults}&term=${encodeURIComponent(query)}`;
       const searchData = await fetchJson(esearchUrl, 30000);
-      const idList = (searchData?.esearchresult?.idlist || []).slice(0, 80);
+      const idList = (searchData?.esearchresult?.idlist || []).slice(0, maxResults);
       if (!idList.length) return [];
       const idsCsv = idList.join(",");
       const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=${encodeURIComponent(idsCsv)}`;
@@ -1246,10 +1384,17 @@ ${JSON.stringify(project)}`;
       return plans;
     }
 
-    async function fetchCandidatesForPlan(plan, diagnostics) {
+    async function fetchCandidatesForPlan(plan, input, diagnostics) {
+      const settings = getRetrievalSettings(input.searchIntent, input.timeHorizonHours);
       const [arxivResult, pubmedResult] = await Promise.allSettled([
-        fetchArxivCandidates(plan.arxivQuery),
-        fetchPubMedCandidates(plan.pubmedQuery),
+        fetchArxivCandidates(plan.arxivQuery, {
+          sortBy: settings.arxivSort,
+          maxResults: settings.arxivMaxResults,
+        }),
+        fetchPubMedCandidates(plan.pubmedQuery, {
+          sort: settings.pubmedSort,
+          maxResults: settings.pubmedMaxResults,
+        }),
       ]);
 
       const arxivCandidates = arxivResult.status === "fulfilled" ? arxivResult.value : [];
@@ -1257,6 +1402,8 @@ ${JSON.stringify(project)}`;
       if (arxivResult.status !== "fulfilled") diagnostics.push(`arXiv fetch warning (${plan.label}): ${String(arxivResult.reason?.message || arxivResult.reason)}`);
       if (pubmedResult.status !== "fulfilled") diagnostics.push(`PubMed fetch warning (${plan.label}): ${String(pubmedResult.reason?.message || pubmedResult.reason)}`);
       diagnostics.push(`Search plan used: ${plan.label}`);
+      diagnostics.push(`Intent: ${getSearchIntentPolicy(input.searchIntent).label} | Horizon: ${formatTimeHorizonLabel(input.timeHorizonKey)}`);
+      diagnostics.push(`Source sort: arXiv ${settings.arxivSort}, PubMed ${settings.pubmedSort}`);
       diagnostics.push(`arXiv query: ${plan.arxivQuery || "N/A"}`);
       diagnostics.push(`PubMed query: ${plan.pubmedQuery || "N/A"}`);
 
@@ -1269,38 +1416,56 @@ ${JSON.stringify(project)}`;
       };
     }
 
-    async function retrieveCandidatesWithAdaptiveLookback(input, topic, diagnostics) {
+    async function retrieveCandidatesForIntent(input, topic, diagnostics) {
+      const policy = getSearchIntentPolicy(input.searchIntent);
       const plans = buildSearchPlans(input, topic);
       let lastAttempt = null;
 
       for (const plan of plans) {
-        const attempt = await fetchCandidatesForPlan(plan, diagnostics);
+        const attempt = await fetchCandidatesForPlan(plan, input, diagnostics);
         lastAttempt = { ...attempt, plan };
         if (!attempt.allCandidates.length) {
           diagnostics.push(`No candidates returned for ${plan.label}.`);
           continue;
         }
-        for (const step of LOOKBACK_STEPS) {
-          const filtered = filterByLookback(attempt.allCandidates, step.hours);
-          diagnostics.push(`Candidates inside ${lookbackLabel(step.hours)} (${plan.label}): ${filtered.length}`);
-          if (filtered.length) {
-            return {
-              ...attempt,
-              plan,
-              candidates: filtered,
-              lookbackHours: step.hours,
-              noRecentWithinMax: false,
-            };
+
+        if (policy.retrievalMode === "adaptive_recent") {
+          for (const step of getAdaptiveLookbackSteps(input.timeHorizonHours)) {
+            const filtered = filterByLookback(attempt.allCandidates, step.hours);
+            diagnostics.push(`Candidates inside ${lookbackLabel(step.hours)} (${plan.label}): ${filtered.length}`);
+            if (filtered.length) {
+              return {
+                ...attempt,
+                plan,
+                candidates: filtered,
+                lookbackHours: step.hours,
+                emptyReason: "",
+              };
+            }
           }
+          diagnostics.push(`No candidates from ${plan.label} remained inside ${lookbackLabel(input.timeHorizonHours)}.`);
+          continue;
         }
-        diagnostics.push(`No candidates from ${plan.label} remained inside the last 180 days.`);
+
+        const filtered = filterByLookback(attempt.allCandidates, input.timeHorizonHours);
+        diagnostics.push(`Candidates inside ${formatTimeHorizonLabel(input.timeHorizonKey)} (${plan.label}): ${filtered.length}`);
+        if (filtered.length) {
+          return {
+            ...attempt,
+            plan,
+            candidates: filtered,
+            lookbackHours: input.timeHorizonHours,
+            emptyReason: "",
+          };
+        }
+        diagnostics.push(`No candidates from ${plan.label} remained inside ${formatTimeHorizonLabel(input.timeHorizonKey)}.`);
       }
 
       return {
         ...(lastAttempt || { arxivCandidates: [], pubmedCandidates: [], allCandidates: [], plan: plans[0] || null }),
         candidates: [],
-        lookbackHours: MAX_LOOKBACK_HOURS,
-        noRecentWithinMax: Boolean(lastAttempt && lastAttempt.allCandidates.length),
+        lookbackHours: input.timeHorizonHours,
+        emptyReason: lastAttempt && lastAttempt.allCandidates.length ? "outside_horizon" : "none_retrieved",
       };
     }
 
@@ -1324,6 +1489,106 @@ ${JSON.stringify(project)}`;
       return result;
     }
 
+    function buildCandidateTerms(input, topic) {
+      return unique([
+        ...(Array.isArray(topic?.keywords) ? topic.keywords : []),
+        ...buildHeuristicTerms(input.projectName, input.projectContext, input.keywords),
+      ])
+        .map((term) => String(term || "").trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 12);
+    }
+
+    function countTermHits(text, terms) {
+      const normalized = String(text || "").toLowerCase();
+      let score = 0;
+      for (const term of terms) {
+        if (!term || !normalized.includes(term)) continue;
+        score += term.includes(" ") ? 2 : 1;
+      }
+      return score;
+    }
+
+    function recencySignal(paper) {
+      const published = toDateSafe(paper?.published_at);
+      if (!published) return 0;
+      const ageDays = Math.max(0, (Date.now() - published.getTime()) / (24 * 3600 * 1000));
+      return 1 / (1 + ageDays / 45);
+    }
+
+    function candidatePriority(intent, paper, terms) {
+      const titleHits = countTermHits(paper?.title, terms);
+      const abstractHits = countTermHits(paper?.abstract, terms);
+      const keywordScore = titleHits * 3 + abstractHits;
+      const freshness = recencySignal(paper);
+      if (intent === "whats_new") {
+        return freshness * 10 + keywordScore * 1.4;
+      }
+      if (intent === "discovery") {
+        return keywordScore * 2.1 + freshness * 1.1;
+      }
+      return keywordScore * 2.7 + freshness * 1.4;
+    }
+
+    function prioritizeCandidatesForIntent(input, topic, candidates) {
+      const terms = buildCandidateTerms(input, topic);
+      return [...candidates].sort((left, right) => {
+        const priorityDiff = candidatePriority(input.searchIntent, right, terms) - candidatePriority(input.searchIntent, left, terms);
+        if (priorityDiff !== 0) return priorityDiff;
+        return (toDateSafe(right.published_at)?.getTime() || 0) - (toDateSafe(left.published_at)?.getTime() || 0);
+      });
+    }
+
+    function buildIntentRankingPolicy(input, minScore) {
+      const policy = getSearchIntentPolicy(input.searchIntent);
+      if (input.searchIntent === "whats_new") {
+        return `
+- search intent: ${policy.label}
+- prioritize recent papers that are still directly useful to the project
+- freshness matters, but do not reward recency alone if relevance is weak
+- if two papers are similarly relevant, prefer the newer one
+- direct project matches should score highest
+- clearly adjacent papers can pass only if the connection is concrete
+- if overlap is only generic medical AI terminology, usually keep the score in 3-5
+- use this rubric:
+  - 9-10: direct and timely paper the user would likely want to check now
+  - 7-8: strong recent fit with clear project usefulness
+  - 5-6: partial fit or older-than-ideal relevance
+  - 3-4: weak fit; broad theme overlap only
+  - 1-2: little meaningful connection
+- score >= ${minScore.toFixed(1)} means pass`;
+      }
+      if (input.searchIntent === "discovery") {
+        return `
+- search intent: ${policy.label}
+- optimize for concrete transfer value, not only exact topic overlap
+- allow adjacent methods, datasets, or evaluation designs when reuse is credible
+- direct matches can still rank highest, but high-upside adjacent work may also score well
+- generic buzzword overlap should usually stay in 3-5
+- use this rubric:
+  - 9-10: near-direct match or exceptional adjacent paper with high reuse value
+  - 7-8: strong adjacent or direct fit with clear transfer path
+  - 5-6: worthwhile exploratory fit; useful for methods, baselines, or framing
+  - 3-4: weak exploratory signal
+  - 1-2: little meaningful value
+- score >= ${minScore.toFixed(1)} means pass`;
+      }
+      return `
+- search intent: ${policy.label}
+- optimize for strongest overall fit to the project, even if papers are not extremely recent
+- direct project matches should score highest
+- clearly reusable methods papers may also score well
+- do not over-penalize disease or population mismatch if modality, task design, evaluation setup, or modeling approach is clearly reusable
+- if overlap is only generic medical AI terminology, usually keep the score in 3-5
+- use this rubric:
+  - 9-10: near-direct project match or must-read paper for the current project
+  - 7-8: strong fit; either direct overlap or highly reusable method, evaluation, or data setup
+  - 5-6: partial or adjacent fit; useful for methodology, baselines, framing, or nearby monitoring
+  - 3-4: weak fit; only broad theme overlap
+  - 1-2: little meaningful connection
+- score >= ${minScore.toFixed(1)} means pass`;
+    }
+
     function buildRankingPrompt(input, topic, candidates) {
       const compact = candidates.map((paper) => ({
         id: paper.id,
@@ -1334,6 +1599,7 @@ ${JSON.stringify(project)}`;
         url: paper.url,
       }));
       const outputLanguage = outputLanguageDisplayName(input.outputLang);
+      const minScore = getSearchIntentPolicy(input.searchIntent).minScore;
       return `You are a personalized research assistant.
 Evaluate how relevant each paper is to the user's research project.
 
@@ -1341,6 +1607,8 @@ Project context:
 - Project name: ${input.projectName}
 - Project context: ${input.projectContext}
 - Topic keywords: ${JSON.stringify(topic.keywords)}
+- Search intent: ${getSearchIntentPolicy(input.searchIntent).label}
+- Requested time horizon: ${formatTimeHorizonLabel(input.timeHorizonKey)}
 
 For each paper, do the following:
 1) score relevance from 1 to 10
@@ -1366,16 +1634,7 @@ Return ONLY JSON object:
 
 Scoring policy:
 - score for practical usefulness to the user's project, not only exact topic overlap
-- direct project matches should score highest, but clearly transferable methods papers may also score well
-- do not over-penalize a paper just because disease or population is different if the modality, task design, evaluation setup, or modeling approach is clearly reusable
-- if overlap is only generic medical AI terminology, usually keep the score in 3-5
-- use this rubric:
-  - 9-10: near-direct project match or must-read paper for the current project
-  - 7-8: strong fit; either direct overlap or highly reusable method, evaluation, or data setup
-  - 5-6: partial or adjacent fit; useful for methodology, baselines, framing, or nearby monitoring
-  - 3-4: weak fit; only broad theme overlap
-  - 1-2: little meaningful connection
-- score >= ${LLM_MIN_SCORE.toFixed(1)} means pass
+${buildIntentRankingPolicy(input, minScore)}
 - do not hallucinate beyond title and abstract
 
 Papers JSON:
@@ -1411,6 +1670,7 @@ ${JSON.stringify(compact)}`;
 
     async function scoreCandidates(input, topic, candidates) {
       const limited = candidates.slice(0, 30);
+      const minScore = getSearchIntentPolicy(input.searchIntent).minScore;
       const { parsed, usedModel } = await callGeminiJson(
         buildRankingPrompt(input, topic, limited),
         input.apiKey,
@@ -1444,7 +1704,8 @@ ${JSON.stringify(compact)}`;
       }
 
       scored.sort((left, right) => right.score - left.score);
-      let finalPapers = scored.filter((paper) => paper.score >= LLM_MIN_SCORE).slice(0, FIXED_PAPER_COUNT);
+      let finalPapers = scored.filter((paper) => paper.score >= minScore).slice(0, FIXED_PAPER_COUNT);
+      const passedCount = finalPapers.length;
 
       if (finalPapers.length < FIXED_PAPER_COUNT) {
         const fallback = limited
@@ -1466,6 +1727,9 @@ ${JSON.stringify(compact)}`;
       return {
         papers: finalPapers.slice(0, FIXED_PAPER_COUNT),
         usedModel,
+        passedCount,
+        fallbackCount: Math.max(0, Math.min(FIXED_PAPER_COUNT, finalPapers.length) - passedCount),
+        minScore,
       };
     }
 
@@ -1492,10 +1756,10 @@ ${JSON.stringify(compact)}`;
       const noResultsMessage = String(payload?.noResultsMessage || "").trim();
       const keywordChips = renderPills(topic.keywords || [], "pm-keyword-chip");
       const diagnosticsHtml = diagnostics.length
-        ? `<div class="pm-diagnostics">${diagnostics.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>`
+        ? `<details class="pm-diagnostics-box"><summary>Diagnostics</summary><div class="pm-diagnostics">${diagnostics.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div></details>`
         : "";
       const noticeHtml = notice
-        ? `<div class="pm-callout pm-callout-use" style="margin-top:14px;"><strong>Preview note</strong><p>${escapeHtml(notice)}</p></div>`
+        ? `<div class="pm-callout pm-callout-use" style="margin-top:14px;"><strong>Search note</strong><p>${escapeHtml(notice)}</p></div>`
         : "";
 
       const cards = papers.map((paper, index) => {
@@ -1538,7 +1802,7 @@ ${JSON.stringify(compact)}`;
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Paper Morning Preview</title>
+  <title>Paper Morning Search Result</title>
   <style>
     :root {
       --paper: #f6f5f1;
@@ -1594,7 +1858,11 @@ ${JSON.stringify(compact)}`;
     .pm-keyword-chip, .pm-evidence-chip { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .pm-keyword-chip { background: #edf3ef; color: var(--forest); border: 1px solid rgba(36, 83, 57, 0.08); }
     .pm-evidence-chip { background: #f1f5fa; color: #456786; border: 1px solid rgba(69, 103, 134, 0.08); }
-    .pm-diagnostics { margin-top: 14px; padding: 14px 16px; border-radius: 14px; border: 1px dashed #c8d2dc; background: #f8fafc; color: #475569; font-size: 12px; line-height: 1.6; }
+    .pm-diagnostics-box { margin-top: 14px; border-radius: 14px; border: 1px dashed #c8d2dc; background: #f8fafc; overflow: hidden; }
+    .pm-diagnostics-box summary { cursor: pointer; list-style: none; padding: 14px 16px; font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #334155; }
+    .pm-diagnostics-box summary::-webkit-details-marker { display: none; }
+    .pm-diagnostics-box[open] summary { border-bottom: 1px dashed #c8d2dc; }
+    .pm-diagnostics { padding: 14px 16px; color: #475569; font-size: 12px; line-height: 1.6; }
     .pm-diagnostics div + div { margin-top: 6px; }
     .pm-body { padding: 18px 22px 8px; }
     .pm-paper-card { margin-bottom: 16px; padding: 18px; border-radius: 18px; border: 1px solid var(--paper-edge); background: #fff; }
@@ -1631,10 +1899,12 @@ ${JSON.stringify(compact)}`;
     <div class="pm-shell">
       <div class="pm-header">
         <h1>Paper Morning</h1>
-        <p>Live preview generated in browser. This is the digest-style HTML only; no email was sent.</p>
+        <p>Live search generated in browser. This is the result page only; no email was sent.</p>
         <div class="pm-meta">
           <div><span>Project</span><strong>${escapeHtml(meta.projectName)}</strong></div>
-          <div><span>Window</span><strong>${escapeHtml(payload.window || lookbackLabel(MAX_LOOKBACK_HOURS))}</strong></div>
+          <div><span>Intent</span><strong>${escapeHtml(payload.intentLabel || getSearchIntentPolicy(meta.searchIntent).label)}</strong></div>
+          <div><span>Window Used</span><strong>${escapeHtml(payload.window || formatTimeHorizonLabel(meta.timeHorizonKey || "1y"))}</strong></div>
+          <div><span>Query Plan</span><strong>${escapeHtml(payload.queryPlanLabel || "Generated query")}</strong></div>
           <div><span>Sources</span><strong>${escapeHtml(sources)}</strong></div>
           <div><span>Gemini model</span><strong>${escapeHtml(meta.usedModel || meta.model)}</strong></div>
         </div>
@@ -1648,6 +1918,8 @@ ${JSON.stringify(compact)}`;
         <div class="pm-topic-card">
           <h3>Generated search profile</h3>
           <div class="pm-keyword-row">${keywordChips || '<span class="pm-keyword-chip">No keywords generated</span>'}</div>
+          <p><strong>Intent:</strong> ${escapeHtml(payload.intentLabel || getSearchIntentPolicy(meta.searchIntent).label)}</p>
+          <p><strong>Requested horizon:</strong> ${escapeHtml(payload.requestedHorizonLabel || formatTimeHorizonLabel(meta.timeHorizonKey || "1y"))}</p>
           <p><strong>arXiv query:</strong> ${escapeHtml(topic.arxiv_query || "N/A")}</p>
           <p><strong>PubMed query:</strong> ${escapeHtml(topic.pubmed_query || "N/A")}</p>
         </div>
@@ -1658,7 +1930,7 @@ ${JSON.stringify(compact)}`;
         ${cards || `<div class="pm-paper-card"><h2>No recent relevant papers found</h2><p class="pm-paper-authors">${escapeHtml(noResultsMessage || "Try a different context, broader keywords, or a less niche framing.")}</p></div>`}
       </div>
       <div class="pm-footer">
-        Preview generated in browser only. Project: ${escapeHtml(meta.projectName)} | Output language: ${escapeHtml(meta.outputLang)} | No email sent.
+        Search generated in browser only. Project: ${escapeHtml(meta.projectName)} | Output language: ${escapeHtml(meta.outputLang)} | No email sent.
       </div>
     </div>
   </div>
@@ -1669,18 +1941,37 @@ ${JSON.stringify(compact)}`;
     function getInputValues() {
       const rawProjectName = document.getElementById("projectName").value.trim();
       const projectContext = document.getElementById("projectContext").value.trim();
+      const searchIntent = searchIntentEl.value || "best_match";
+      const timeHorizonKey = timeHorizonEl.value || getSearchIntentPolicy(searchIntent).defaultHorizon;
       return {
         projectName: normalizeProjectName(rawProjectName, projectContext),
         projectContext,
         keywords: document.getElementById("keywords").value.trim(),
+        searchIntent,
+        timeHorizonKey,
+        timeHorizonHours: getTimeHorizonConfig(timeHorizonKey).hours,
         outputLang: document.getElementById("outputLang").value,
         apiKey: document.getElementById("apiKey").value.trim(),
         model: document.getElementById("model").value.trim() || "gemini-3.1-flash",
       };
     }
 
-    function buildLoadingMarkup(projectName) {
-      return `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Paper Morning Preview</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(180deg,#f8f2e8 0%,#edf1f4 100%);font-family:Arial,sans-serif;color:#1b2430}.loading-card{width:min(640px,calc(100% - 24px));padding:28px;border-radius:22px;background:rgba(255,255,255,0.92);border:1px solid rgba(35,54,38,0.08);box-shadow:0 18px 48px rgba(29,40,34,0.12)}h1{margin:0 0 10px;font-size:30px;line-height:1.05}p{margin:0;font-size:14px;line-height:1.7;color:#5a6473}.line{margin-top:14px;height:10px;border-radius:999px;background:linear-gradient(90deg,rgba(35,79,57,0.16),rgba(240,162,82,0.22),rgba(35,79,57,0.16));animation:shimmer 1.4s linear infinite;background-size:200% 100%}@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}</style></head><body><div class="loading-card"><h1>Generating your Paper Morning preview</h1><p>Project: ${escapeHtml(projectName)}</p><p style="margin-top:8px;">The page is generating search queries, retrieving recent papers, ranking them, and composing the email-style HTML. This can take around 30-90 seconds depending on source and API latency.</p><div class="line"></div></div></body></html>`;
+    function buildLoadingMarkup(projectName, input) {
+      const policy = getSearchIntentPolicy(input.searchIntent);
+      return `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Paper Morning Search</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(180deg,#f8f2e8 0%,#edf1f4 100%);font-family:Arial,sans-serif;color:#1b2430}.loading-card{width:min(640px,calc(100% - 24px));padding:28px;border-radius:22px;background:rgba(255,255,255,0.92);border:1px solid rgba(35,54,38,0.08);box-shadow:0 18px 48px rgba(29,40,34,0.12)}h1{margin:0 0 10px;font-size:30px;line-height:1.05}p{margin:0;font-size:14px;line-height:1.7;color:#5a6473}.line{margin-top:14px;height:10px;border-radius:999px;background:linear-gradient(90deg,rgba(35,79,57,0.16),rgba(240,162,82,0.22),rgba(35,79,57,0.16));animation:shimmer 1.4s linear infinite;background-size:200% 100%}@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}</style></head><body><div class="loading-card"><h1>Searching with Paper Morning</h1><p>Project: ${escapeHtml(projectName)}</p><p style="margin-top:8px;">Intent: ${escapeHtml(policy.label)} | Horizon: ${escapeHtml(formatTimeHorizonLabel(input.timeHorizonKey))}</p><p style="margin-top:8px;">The page is generating search queries, retrieving candidates, ranking them, and composing the result page. This can take around 30-90 seconds depending on source and API latency.</p><div class="line"></div></div></body></html>`;
+    }
+
+    function buildNoResultsMessage(input, retrieval) {
+      if (retrieval.emptyReason === "outside_horizon") {
+        if (input.searchIntent === "whats_new") {
+          return `No relevant papers were found within ${formatTimeHorizonLabel(input.timeHorizonKey)}. Try a wider horizon or switch to Best Match.`;
+        }
+        if (input.searchIntent === "discovery") {
+          return `No useful discovery papers were found within ${formatTimeHorizonLabel(input.timeHorizonKey)}. Try a broader context or a longer horizon.`;
+        }
+        return `No strong-fit papers were found within ${formatTimeHorizonLabel(input.timeHorizonKey)} for this context. Try 3 years, 5 years, or broader wording.`;
+      }
+      return "No live candidates were retrieved for this context. Try broader keywords or a different project framing.";
     }
 
     async function runPreview() {
@@ -1701,11 +1992,12 @@ ${JSON.stringify(compact)}`;
       }
 
       previewWindow.document.open();
-      previewWindow.document.write(buildLoadingMarkup(input.projectName));
+      previewWindow.document.write(buildLoadingMarkup(input.projectName, input));
       previewWindow.document.close();
 
       runBtn.disabled = true;
       const diagnostics = [];
+      const policy = getSearchIntentPolicy(input.searchIntent);
 
       try {
         setStatus("Generating source queries from your research context...");
@@ -1715,43 +2007,58 @@ ${JSON.stringify(compact)}`;
         diagnostics.push(`Topic name: ${topic.name}`);
         diagnostics.push(`Keywords: ${topic.keywords.join(", ")}`);
 
-        setStatus("Retrieving live candidates from arXiv and PubMed with adaptive lookback...");
-        const retrieval = await retrieveCandidatesWithAdaptiveLookback(input, topic, diagnostics);
+        setStatus(`Retrieving live candidates for ${policy.label}...`);
+        const retrieval = await retrieveCandidatesForIntent(input, topic, diagnostics);
         const scannedTotal = retrieval.allCandidates.length;
-        const filteredCandidates = retrieval.candidates.slice(0, 30);
-        diagnostics.push(`Selected live preview window: ${lookbackLabel(retrieval.lookbackHours)}`);
-        if (!filteredCandidates.length) {
+        const prioritizedCandidates = prioritizeCandidatesForIntent(input, topic, retrieval.candidates).slice(0, 30);
+        diagnostics.push(`Selected search window: ${lookbackLabel(retrieval.lookbackHours)}`);
+        diagnostics.push(`Candidates sent to Gemini after intent prioritization: ${prioritizedCandidates.length}`);
+        if (!prioritizedCandidates.length) {
+          const noResultsMessage = buildNoResultsMessage(input, retrieval);
           const payload = {
             window: toIsoWindow(retrieval.lookbackHours),
             scanned: scannedTotal,
             diagnostics,
             topic,
+            intentLabel: policy.label,
+            requestedHorizonLabel: formatTimeHorizonLabel(input.timeHorizonKey),
+            queryPlanLabel: retrieval.plan?.label || "Generated query",
             papers: [],
-            notice: "The preview widened the search window step by step, but still could not find recent papers to show.",
-            noResultsMessage: retrieval.noRecentWithinMax
-              ? "No relevant papers were found within the last 6 months for this context. Try a broader or differently phrased project description."
-              : "No live candidates were retrieved for this context. Try broader keywords or a different project framing.",
+            notice: `Paper Morning searched ${lookbackLabel(retrieval.lookbackHours)} using ${policy.label}, but could not find papers to show.`,
+            noResultsMessage,
           };
           const html = renderPreviewHtml(payload, { ...input, usedModel: topicResult.usedModel });
           localStorage.setItem(storageKey, html);
           previewWindow.document.open();
           previewWindow.document.write(html);
           previewWindow.document.close();
-          setStatus(payload.noResultsMessage, true);
+          setStatus(noResultsMessage, true);
           return;
         }
 
-        setStatus("Ranking and summarizing the retrieved candidates with Gemini...");
-        const scoring = await scoreCandidates(input, topic, filteredCandidates);
+        setStatus(`Ranking and summarizing the ${policy.label} candidates with Gemini...`);
+        const scoring = await scoreCandidates(input, topic, prioritizedCandidates);
         diagnostics.push(`Ranking model used: ${scoring.usedModel}`);
         diagnostics.push(`Final selected papers: ${scoring.papers.length}`);
+        diagnostics.push(`Papers above relevance threshold ${scoring.minScore.toFixed(1)}: ${scoring.passedCount}`);
+        diagnostics.push(`Fallback candidates shown below threshold: ${scoring.fallbackCount}`);
+
+        let notice = `Search mode: ${policy.label}. Window used: ${lookbackLabel(retrieval.lookbackHours)}. Query plan: ${retrieval.plan?.label || "Generated query"}.`;
+        if (scoring.passedCount === 0 && scoring.papers.length) {
+          notice += " No papers crossed the relevance threshold, so the nearest candidates are shown for inspection.";
+        } else if (scoring.fallbackCount > 0) {
+          notice += " A few near-threshold candidates were included to fill the result set.";
+        }
 
         const payload = {
           window: toIsoWindow(retrieval.lookbackHours),
           scanned: scannedTotal,
           diagnostics,
           topic,
-          notice: `Live preview searched ${lookbackLabel(retrieval.lookbackHours)} before finding usable recent candidates.`,
+          intentLabel: policy.label,
+          requestedHorizonLabel: formatTimeHorizonLabel(input.timeHorizonKey),
+          queryPlanLabel: retrieval.plan?.label || "Generated query",
+          notice,
           papers: scoring.papers.map((paper) => ({
             title: paper.title,
             authors: paper.authors,
@@ -1771,7 +2078,7 @@ ${JSON.stringify(compact)}`;
         previewWindow.document.write(html);
         previewWindow.document.close();
 
-        setStatus(`Preview generated.\nTopic: ${topic.name}\nWindow: ${lookbackLabel(retrieval.lookbackHours)}\nScanned: ${scannedTotal}, selected: ${payload.papers.length}\nGemini ranking model: ${scoring.usedModel}`);
+        setStatus(`Search completed.\nTopic: ${topic.name}\nIntent: ${policy.label}\nWindow: ${lookbackLabel(retrieval.lookbackHours)}\nScanned: ${scannedTotal}, selected: ${payload.papers.length}\nGemini ranking model: ${scoring.usedModel}`);
       } catch (error) {
         try {
           previewWindow.close();
@@ -1785,7 +2092,7 @@ ${JSON.stringify(compact)}`;
     function openLastPreview() {
       const cached = localStorage.getItem(storageKey);
       if (!cached) {
-        setStatus("No local preview cache found yet. Generate one first.", true);
+        setStatus("No saved result found yet. Run a search first.", true);
         return;
       }
       const previewWindow = window.open("about:blank", "pm-live-preview");
@@ -1796,9 +2103,11 @@ ${JSON.stringify(compact)}`;
       previewWindow.document.open();
       previewWindow.document.write(cached);
       previewWindow.document.close();
-      setStatus("Opened the last generated preview in a new tab.");
+      setStatus("Opened the last saved result in a new tab.");
     }
 
+    refreshTimeHorizonOptions(false);
+    searchIntentEl.addEventListener("change", () => refreshTimeHorizonOptions(false));
     runBtn.addEventListener("click", runPreview);
     openLastBtn.addEventListener("click", openLastPreview);
 

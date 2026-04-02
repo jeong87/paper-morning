@@ -12,7 +12,7 @@
 ## 1) 먼저 성공해야 할 것
 먼저 할 일:
 - 프로젝트 설명 입력
-- 미리보기 1회 생성
+- 검색 결과 1회 생성
 
 나중에 할 일:
 - 이메일 발송 설정
@@ -52,14 +52,14 @@ http://127.0.0.1:5050/setup
 - 키워드(선택)
 - Gemini API Key
 
-5. `Save and Preview Now` 클릭
+5. `Save and Search Now` 클릭
 6. Dashboard에서 확인:
 - `Latest Preview Output`
 - 상단 논문 카드/진단 정보
 - 점수 분포(`9-10 / 7-8 / 5-6 / 1-4 / 0`)
 - 스코어링 목록(`score | title`)으로 임계값 조정 가능
 
-미리보기 품질이 괜찮으면 아래 선택 단계를 진행하세요.
+검색 결과 품질이 괜찮으면 아래 선택 단계를 진행하세요.
 
 ## 4) 선택: 이메일 발송 켜기 (미리보기 후)
 `/setup`의 **Automation + email transport (advanced)** 를 열고 입력:

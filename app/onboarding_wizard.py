@@ -143,12 +143,12 @@ def collect_topics() -> List[Dict[str, Any]]:
         relevance_mode = prompt_relevance_mode(default="balanced")
 
         arxiv_query = prompt_text(
-            "arXiv query (optional now, but required before digest run)",
+            "arXiv query (optional now, but recommended before local search)",
             default="",
             required=False,
         )
         pubmed_query = prompt_text(
-            "PubMed query (optional now, but required before digest run)",
+            "PubMed query (optional now, but recommended before local search)",
             default="",
             required=False,
         )
@@ -221,6 +221,8 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
         f"TIMEZONE={values_to_write['TIMEZONE']}",
         f"SEND_HOUR={values_to_write['SEND_HOUR']}",
         f"SEND_MINUTE={values_to_write['SEND_MINUTE']}",
+        f"SEARCH_INTENT_DEFAULT={values_to_write['SEARCH_INTENT_DEFAULT']}",
+        f"SEARCH_TIME_HORIZON_DEFAULT={values_to_write['SEARCH_TIME_HORIZON_DEFAULT']}",
         "",
         f"LOOKBACK_HOURS={values_to_write['LOOKBACK_HOURS']}",
         f"MAX_PAPERS={values_to_write['MAX_PAPERS']}",
@@ -280,9 +282,23 @@ def main() -> int:
     project_keywords = parse_keywords(prompt_text("Optional keywords (comma separated)", default=""))
     projects = [{"name": project_name, "context": project_context, "keywords": project_keywords}]
 
-    print("\n[Step 2] Preview defaults")
-    max_papers = prompt_int("How many papers per digest?", 5, 1, 50)
+    print("\n[Step 2] Search defaults")
+    max_papers = prompt_int("How many papers per search result?", 5, 1, 50)
     output_language = prompt_text("Output language (en/ko/ja/es/...)", default="en")
+    search_intent_default = prompt_text(
+        "Default search intent (best_match / whats_new / discovery)",
+        default="best_match",
+        required=True,
+    ).strip().lower()
+    if search_intent_default not in {"best_match", "whats_new", "discovery"}:
+        search_intent_default = "best_match"
+    search_time_horizon_default = prompt_text(
+        "Default time horizon (7d / 30d / 180d / 1y / 3y / 5y)",
+        default="1y",
+        required=True,
+    ).strip().lower()
+    if search_time_horizon_default not in {"7d", "30d", "180d", "1y", "3y", "5y"}:
+        search_time_horizon_default = "1y"
 
     print("\n[Step 3] LLM key for query generation + summaries")
     gemini_api_key = prompt_text("Gemini API key (required for preview-first flow)", required=True, secret=True)
@@ -303,11 +319,11 @@ def main() -> int:
         cerebras_model = prompt_text("Cerebras model", default="gpt-oss-120b")
         cerebras_api_base = prompt_text("Cerebras API base", default=CEREBRAS_API_BASE_DEFAULT)
 
-    print("\n[Step 4] Optional daily automation settings")
+    print("\n[Step 4] Optional morning popup / email settings")
     timezone_name = prompt_text("Timezone (e.g. America/New_York, Europe/London, Asia/Seoul)", default="UTC")
     send_hour = prompt_int("Send hour (0-23)", 9, 0, 23)
     send_minute = prompt_int("Send minute (0-59)", 0, 0, 59)
-    auto_open_digest_window = prompt_yes_no("Open digest automatically at the scheduled time when the app is running?", default_yes=True)
+    auto_open_digest_window = prompt_yes_no("Open the saved search result automatically at the scheduled time when the app is running?", default_yes=True)
     configure_email_now = prompt_yes_no("Configure Gmail delivery now? (optional)", default_yes=False)
 
     gmail_address = ""
@@ -368,6 +384,8 @@ def main() -> int:
         "TIMEZONE": timezone_name,
         "SEND_HOUR": str(send_hour),
         "SEND_MINUTE": str(send_minute),
+        "SEARCH_INTENT_DEFAULT": search_intent_default,
+        "SEARCH_TIME_HORIZON_DEFAULT": search_time_horizon_default,
         "SEND_FREQUENCY": "daily",
         "SEND_ANCHOR_DATE": "2026-01-01",
         "LOOKBACK_HOURS": str(lookback_hours),
@@ -441,8 +459,8 @@ def main() -> int:
     print(f"Saved topics scaffold: {topics_path}")
     print("Next steps (recommended):")
     print("1) python app/web_app.py --host 127.0.0.1 --port 5050")
-    print("2) Open /setup, click 'Save and Preview Now'")
-    print("3) After preview quality check, enable daily automation settings")
+    print("2) Open /setup, click 'Save and Search Now'")
+    print("3) After preview quality check, optionally enable morning popup or Gmail delivery")
 
     if prompt_yes_no("Run local dry-run preview now? (topics must be generated first in web setup)", default_yes=False):
         try:

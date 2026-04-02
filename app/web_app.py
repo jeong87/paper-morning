@@ -50,6 +50,10 @@ from paper_digest_app import (
     load_google_oauth_bundle_defaults,
     normalize_delivery_mode,
     normalize_relevance_mode,
+    normalize_search_intent,
+    normalize_time_horizon_key,
+    search_intent_label,
+    time_horizon_label,
     resolve_secret_value,
     resolve_env_path,
     run_digest,
@@ -77,12 +81,12 @@ def read_app_version() -> str:
         value = version_path.read_text(encoding="utf-8-sig").strip()
         if value:
             return value
-    return "0.5.2"
+    return "0.7.0"
 
 
 APP_VERSION = read_app_version()
-APP_TITLE = f"Paper Digest Web Console v{APP_VERSION}"
-SCHEDULER_JOB_ID = "daily-paper-digest-web-job"
+APP_TITLE = f"Paper Morning Local Console v{APP_VERSION}"
+SCHEDULER_JOB_ID = "paper-morning-local-job"
 SESSION_SECRET_ENV_KEY = "WEB_APP_SECRET_KEY"
 AUTH_TOKEN_ENV_KEY = "WEB_APP_AUTH_TOKEN"
 WEB_AUTH_SESSION_KEY = "pm_auth_ok"
@@ -114,6 +118,8 @@ EXPECTED_ENV_KEYS = [
     "SEND_HOUR",
     "SEND_MINUTE",
     "SEND_TIME_WINDOW_MINUTES",
+    "SEARCH_INTENT_DEFAULT",
+    "SEARCH_TIME_HORIZON_DEFAULT",
     "SEND_FREQUENCY",
     "SEND_ANCHOR_DATE",
     "LOOKBACK_HOURS",
@@ -171,6 +177,8 @@ DEFAULT_ENV_VALUES = {
     "SEND_HOUR": "9",
     "SEND_MINUTE": "0",
     "SEND_TIME_WINDOW_MINUTES": "15",
+    "SEARCH_INTENT_DEFAULT": "best_match",
+    "SEARCH_TIME_HORIZON_DEFAULT": "1y",
     "SEND_FREQUENCY": "daily",
     "SEND_ANCHOR_DATE": "2026-01-01",
     "LOOKBACK_HOURS": "24",
@@ -765,6 +773,25 @@ def env_truthy(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_search_intent_options() -> List[Tuple[str, str]]:
+    return [
+        ("best_match", "Best Match"),
+        ("whats_new", "What's New"),
+        ("discovery", "Discovery"),
+    ]
+
+
+def get_time_horizon_options_for_intent(intent: str) -> List[Tuple[str, str]]:
+    normalized = normalize_search_intent(intent)
+    if normalized == "whats_new":
+        keys = ["7d", "30d", "180d", "1y"]
+    elif normalized == "discovery":
+        keys = ["180d", "1y", "3y", "5y"]
+    else:
+        keys = ["180d", "1y", "3y", "5y"]
+    return [(key, time_horizon_label(key, normalized)) for key in keys]
+
+
 def get_effective_delivery_mode(env_map: Dict[str, str]) -> str:
     return normalize_delivery_mode(str(env_map.get("DELIVERY_MODE", "local_inbox")))
 
@@ -1288,7 +1315,7 @@ def scheduled_digest_job() -> None:
         update_job_state(
             running=True,
             kind="dry_run" if delivery_mode == "local_inbox" else "send_now",
-            status=f"Scheduled {delivery_mode_label(delivery_mode)} job started...",
+            status=f"Scheduled {delivery_mode_label(delivery_mode)} search started...",
             progress=5,
             error="",
             started_at=now_iso(),
@@ -1308,11 +1335,11 @@ def scheduled_digest_job() -> None:
             update_job_state(status=output, progress=100)
         elif not require_email and auto_open_digest_window_enabled(env_map):
             opened = maybe_open_preview_window()
-            status = "Local inbox preview opened." if opened else "Local inbox preview generated."
+            status = "Local inbox result opened." if opened else "Local inbox result generated."
             update_job_state(status=status, progress=100)
         else:
             update_job_state(
-                status=f"Scheduled {delivery_mode_label(delivery_mode)} digest completed.",
+                status=f"Scheduled {delivery_mode_label(delivery_mode)} search completed.",
                 progress=100,
             )
         if require_email:
@@ -1320,7 +1347,7 @@ def scheduled_digest_job() -> None:
         else:
             last_dry_run_output = output
     except Exception as exc:
-        logging.exception("Scheduled digest job failed.")
+        logging.exception("Scheduled search job failed.")
         update_job_state(
             running=False,
             error=safe_exception_text(exc),
@@ -1874,7 +1901,7 @@ def read_local_inbox_entries(limit: int = 20) -> List[Dict[str, Any]]:
         entries.append(
             {
                 "id": entry_id,
-                "subject": str(payload.get("subject", "") or "Paper Morning Digest").strip(),
+                "subject": str(payload.get("subject", "") or "Paper Morning Search Result").strip(),
                 "generated_at_utc": generated_at,
                 "paper_count": int(payload.get("paper_count", 0) or 0),
                 "delivery_mode": delivery_mode_label(str(payload.get("delivery_mode", "local_inbox"))),
@@ -1913,7 +1940,7 @@ def update_job_state(**changes: Any) -> None:
         job_state.update(changes)
 
 
-def start_background_job(kind: str) -> Tuple[bool, str]:
+def start_background_job(kind: str, options: Dict[str, Any] | None = None) -> Tuple[bool, str]:
     if kind in {"dry_run", "send_now"}:
         env_map = read_env_map()
         topics_path = get_topics_path(env_map)
@@ -1968,12 +1995,21 @@ def start_background_job(kind: str) -> Tuple[bool, str]:
             }
         )
 
-    threading.Thread(target=run_background_job, args=(kind,), daemon=True).start()
+    threading.Thread(target=run_background_job, args=(kind, options or {}), daemon=True).start()
     return True, "Task started."
 
 
-def run_background_job(kind: str) -> None:
+def run_background_job(kind: str, options: Dict[str, Any] | None = None) -> None:
     global last_dry_run_output, last_send_result
+    job_options = options or {}
+    raw_search_intent = job_options.get("search_intent")
+    raw_time_horizon_key = job_options.get("time_horizon_key")
+    search_intent = normalize_search_intent(raw_search_intent) if raw_search_intent else None
+    time_horizon_key = (
+        normalize_time_horizon_key(raw_time_horizon_key, search_intent or "best_match")
+        if raw_time_horizon_key
+        else None
+    )
 
     def progress_cb(message: str, percent: int) -> None:
         update_job_state(status=message, progress=percent)
@@ -1986,10 +2022,12 @@ def run_background_job(kind: str) -> None:
                 config,
                 dry_run=True,
                 print_dry_run_output=False,
+                search_intent=search_intent,
+                time_horizon_key=time_horizon_key,
                 progress_callback=progress_cb,
             )
             last_dry_run_output = output
-            update_job_state(status="Preview generated.", progress=100)
+            update_job_state(status="Search result generated.", progress=100)
         elif kind == "send_now":
             progress_cb("Loading configuration...", 5)
             config = load_config(require_email_credentials=True)
@@ -1998,6 +2036,8 @@ def run_background_job(kind: str) -> None:
                 dry_run=False,
                 force_send=True,
                 print_dry_run_output=False,
+                search_intent=search_intent,
+                time_horizon_key=time_horizon_key,
                 progress_callback=progress_cb,
             )
             last_send_result = output
@@ -2236,7 +2276,7 @@ def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
     return result
 
-def build_home_body() -> str:
+def _legacy_build_home_body() -> str:
     env_map = read_env_map()
     autorun_kind = str(request.args.get("autorun", "") or "").strip()
     if autorun_kind not in {"dry_run"}:
@@ -2625,6 +2665,367 @@ def build_home_body() -> str:
     )
 
 
+def build_home_body_search_first() -> str:
+    env_map = read_env_map()
+    autorun_kind = str(request.args.get("autorun", "") or "").strip()
+    if autorun_kind not in {"dry_run"}:
+        autorun_kind = ""
+    delivery_mode = get_effective_delivery_mode(env_map)
+    delivery_mode_text = delivery_mode_label(delivery_mode)
+    uses_email_delivery = delivery_requires_email(delivery_mode)
+    auto_open_text = "Enabled" if auto_open_digest_window_enabled(env_map) else "Disabled"
+    send_frequency = str(env_map.get("SEND_FREQUENCY", "daily") or "daily").strip().lower()
+    send_frequency_label = {
+        "daily": "Daily",
+        "every_3_days": "Every 3 days",
+        "weekly": "Weekly (7 days)",
+    }.get(send_frequency, send_frequency)
+    default_intent = normalize_search_intent(str(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")))
+    default_horizon = normalize_time_horizon_key(
+        str(env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y")),
+        default_intent,
+    )
+    preview_payload = read_latest_preview_payload()
+    preview_papers = preview_payload.get("papers", []) if isinstance(preview_payload, dict) else []
+    has_preview_html = bool(
+        str(preview_payload.get("html_preview", "")).strip() if isinstance(preview_payload, dict) else ""
+    )
+    latest_intent = search_intent_label(str(preview_payload.get("search_intent", "best_match")))
+    latest_horizon = str(preview_payload.get("requested_time_horizon_label", "") or "N/A")
+    latest_window = str(preview_payload.get("window_used_label", "") or "N/A")
+    latest_notice = str(preview_payload.get("notice", "") or "No saved result note yet.")
+    escaped_status = html.escape(scheduler_status_text())
+    escaped_output = html.escape(last_dry_run_output) if last_dry_run_output else "No search result generated yet."
+
+    preview_rows: List[str] = []
+    for idx, paper in enumerate(preview_papers[:5], start=1):
+        if not isinstance(paper, dict):
+            continue
+        title = html.escape(str(paper.get("title", "") or "Untitled"))
+        source = html.escape(str(paper.get("source", "") or "unknown"))
+        score = html.escape(str(paper.get("score", "") or ""))
+        topic = html.escape(str(paper.get("topic", "") or "N/A"))
+        mode = html.escape(str(paper.get("relevance_mode", "") or "balanced"))
+        url = html.escape(str(paper.get("url", "") or ""), quote=True)
+        title_html = f'<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a>' if url else title
+        preview_rows.append(
+            "<div style='padding:10px 0; border-bottom:1px solid var(--card-border);'>"
+            f"<div style='font-weight:600;'>#{idx} {title_html}</div>"
+            f"<div class='small' style='margin-top:4px;'>Source: <b>{source}</b> · Score: <b>{score}</b> · Topic: <b>{topic}</b> · Mode: <b>{mode}</b></div>"
+            "</div>"
+        )
+    preview_rows_html = "".join(preview_rows) if preview_rows else "<div class='small'>Run <b>Search Now</b> to generate your first local search result.</div>"
+
+    inbox_entries = read_local_inbox_entries(limit=5)
+    inbox_rows_html = "".join(
+        (
+            "<div style='padding:10px 0; border-bottom:1px solid var(--card-border);'>"
+            f"<div style='font-weight:600;'><a href=\"{html.escape(url_for('inbox_entry', entry_id=str(entry.get('id', ''))), quote=True)}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+            f"{html.escape(str(entry.get('subject', '') or 'Paper Morning Search Result'))}</a></div>"
+            f"<div class='small' style='margin-top:4px;'>"
+            f"{html.escape(str(entry.get('generated_at_utc', '') or ''))} · "
+            f"{html.escape(str(entry.get('delivery_mode', '') or 'Local Inbox'))} · "
+            f"{html.escape(str(entry.get('paper_count', 0)))} papers"
+            "</div></div>"
+        )
+        for entry in inbox_entries
+    ) or "<div class='small'>No saved search results yet. Search once to populate Local Inbox.</div>"
+
+    oauth_values = get_effective_google_oauth_values(env_map)
+    oauth_connected_email = str(env_map.get("GOOGLE_OAUTH_CONNECTED_EMAIL", "") or "").strip()
+    oauth_enabled = env_truthy(str(env_map.get("ENABLE_GOOGLE_OAUTH", "false")))
+    oauth_use_for_gmail = env_truthy(str(env_map.get("GOOGLE_OAUTH_USE_FOR_GMAIL", "true")))
+    oauth_refresh_ready = bool(
+        resolve_secret_value("GOOGLE_OAUTH_REFRESH_TOKEN", str(env_map.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")))
+    )
+    oauth_client_ready = bool(
+        str(oauth_values.get("client_id", "")).strip() and str(oauth_values.get("client_secret", "")).strip()
+    )
+    oauth_ready = oauth_enabled and oauth_use_for_gmail and oauth_client_ready and oauth_refresh_ready
+    if oauth_ready:
+        oauth_badge_html = '<span class="badge badge-running">🟢 Connected</span>'
+        oauth_message = "Google OAuth Gmail sending is ready."
+    elif oauth_client_ready:
+        oauth_badge_html = '<span class="badge badge-idle">🟡 Sign-in required</span>'
+        oauth_message = "OAuth client settings are ready. Complete Google sign-in when you want email delivery."
+    else:
+        oauth_badge_html = '<span class="badge badge-danger">🔴 Not configured</span>'
+        oauth_message = "OAuth client information is missing. Local inbox does not require it."
+    oauth_source = "Bundled distribution" if (
+        oauth_values.get("using_bundled_client_id") or oauth_values.get("using_bundled_client_secret")
+    ) else "Settings values"
+    oauth_controls_html = ""
+    if OAUTH_UI_ENABLED:
+        oauth_controls_html = (
+            f'<a class="btn btn-ghost" href="{url_for("google_oauth_start")}">Connect Google sign-in</a>'
+            '<button type="button" class="btn-danger" onclick="disconnectGoogleOauth()">Disconnect</button>'
+        )
+
+    intent_options_html = "".join(
+        f'<option value="{html.escape(value, quote=True)}" {"selected" if value == default_intent else ""}>{html.escape(label)}</option>'
+        for value, label in get_search_intent_options()
+    )
+    horizon_options_map = {
+        intent: [{"value": value, "label": label} for value, label in get_time_horizon_options_for_intent(intent)]
+        for intent, _label in get_search_intent_options()
+    }
+    horizon_options_html = "".join(
+        f'<option value="{html.escape(row["value"], quote=True)}" {"selected" if row["value"] == default_horizon else ""}>{html.escape(row["label"])}</option>'
+        for row in horizon_options_map.get(default_intent, [])
+    )
+
+    body = f"""
+    <div class="page-header">
+      <h1>Search Dashboard</h1>
+      <p>Search your saved research context on demand first. Morning popup and Gmail remain optional delivery layers.</p>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Search</p>
+      <div class="settings-grid">
+        <div class="settings-row">
+          <div class="settings-label"><strong>Search intent</strong><small>Best Match, What's New, or Discovery.</small></div>
+          <select id="search-intent" style="width:240px;">{intent_options_html}</select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label"><strong>Time horizon</strong><small>Longer horizons search more broadly and may cost more reranking tokens.</small></div>
+          <select id="time-horizon" style="width:240px;">{horizon_options_html}</select>
+        </div>
+      </div>
+      <div class="button-row" style="margin-top:16px;">
+        <button id="btn-dry" class="btn-success" onclick="startJob('dry_run')">Search Now</button>
+        <button id="btn-open-preview" class="btn-ghost" onclick="openPreviewTab()" {"disabled" if not has_preview_html else ""}>Open Latest Result</button>
+        <button id="btn-open-inbox" class="btn-ghost" onclick="window.location.href='{url_for("inbox_page")}';">Open Local Inbox</button>
+      </div>
+      <p class="small" style="margin-top:10px;">Scheduled popup defaults: <b>{html.escape(search_intent_label(default_intent))}</b> / <b>{html.escape(time_horizon_label(default_horizon, default_intent))}</b></p>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Local Delivery</p>
+      <div class="small">
+        <strong>Current mode</strong>: <b>{html.escape(delivery_mode_text)}</b><br/>
+        <strong>Morning popup</strong>: <b>{html.escape(auto_open_text)}</b><br/>
+        <strong>Schedule</strong>: <b>{html.escape(send_frequency_label)}</b><br/>
+        <strong>Scheduler status</strong>: <b>{escaped_status}</b>
+      </div>
+    </div>
+
+    <details class="card">
+      <summary style="cursor:pointer; font-weight:600;">Advanced automation and email delivery</summary>
+      <div class="action-grid" style="margin-top:12px;">
+        <div class="action-card">
+          <span class="action-icon">📨</span>
+          <span class="action-label">Send Now</span>
+          <span class="action-desc">Email the current search result using the selected intent and horizon.</span>
+          <button id="btn-send" onclick="startJob('send_now')" {"disabled" if not uses_email_delivery else ""}>Send</button>
+        </div>
+        <div class="action-card">
+          <span class="action-icon">🔄</span>
+          <span class="action-label">Reload Scheduler</span>
+          <span class="action-desc">Reload the local scheduler after changing popup time or defaults.</span>
+          <button id="btn-reload" class="btn-ghost" onclick="startJob('reload_scheduler')">Reload</button>
+        </div>
+        <div class="action-card">
+          <span class="action-icon">🪟</span>
+          <span class="action-label">Windows Task</span>
+          <span class="action-desc">Register the local UI in Windows Task Scheduler.</span>
+          <button id="btn-task" class="btn-ghost" onclick="startJob('register_windows_task')">Register</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <p class="card-title">Google OAuth Status</p>
+        <div class="status-panel">
+          <div class="status-kv"><div class="kv-label">Connection</div><div class="kv-value">{oauth_badge_html}</div></div>
+          <div class="status-kv"><div class="kv-label">Connected account</div><div class="kv-value">{html.escape(oauth_connected_email or "Not connected")}</div></div>
+          <div class="status-kv"><div class="kv-label">Client source</div><div class="kv-value">{html.escape(oauth_source)}</div></div>
+        </div>
+        <p class="small" style="margin-top:8px;">{html.escape(oauth_message)}</p>
+        <p class="small" style="margin-top:6px; color:var(--text-sub);">Bundled client status: {"Available" if oauth_values.get("bundle_ready") else "Not available"}</p>
+        <div class="button-row" style="margin-top:12px;">{oauth_controls_html}</div>
+      </div>
+    </details>
+
+    <div class="card">
+      <p class="card-title">Task Status</p>
+      <div class="status-panel">
+        <div class="status-kv"><div class="kv-label">Status</div><div class="kv-value" id="status-badge"><span class="badge badge-idle">⬜ Idle</span></div></div>
+        <div class="status-kv"><div class="kv-label">Started At</div><div class="kv-value" id="status-started">—</div></div>
+        <div class="status-kv"><div class="kv-label">Finished At</div><div class="kv-value" id="status-finished">—</div></div>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="job-progress"></div></div>
+      <p id="job-message" style="margin:8px 0 0; font-size:13px; color:var(--text-sub);">No running task.</p>
+      <p id="job-error" class="text-danger" style="margin:4px 0 0; font-size:13px;"></p>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Latest Result</p>
+      <div class="small" style="margin-bottom:12px;">
+        <strong>Intent</strong>: {html.escape(latest_intent)}<br/>
+        <strong>Requested horizon</strong>: {html.escape(latest_horizon)}<br/>
+        <strong>Window used</strong>: {html.escape(latest_window)}
+      </div>
+      <div style="margin-bottom:12px; color:var(--text-sub);">{html.escape(latest_notice)}</div>
+      <div>{preview_rows_html}</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <p class="card-title" style="margin:0; border:none; padding:0;">Local Inbox</p>
+        <a class="btn-ghost" href="{url_for("inbox_page")}">Open Full Inbox</a>
+      </div>
+      <div>{inbox_rows_html}</div>
+    </div>
+
+    <details class="card">
+      <summary style="cursor:pointer; font-weight:600;">Raw text output</summary>
+      <div style="margin-top:10px;"><pre id="output-pre">{escaped_output}</pre></div>
+    </details>
+
+    <script>
+      const TIME_HORIZON_OPTIONS = {json.dumps(horizon_options_map, ensure_ascii=False)};
+      let previewWindow = null;
+      const JOB_LABEL = {{ dry_run: 'Search', send_now: 'Send Now', reload_scheduler: 'Reload Scheduler', register_windows_task: 'Windows Task Register', none: '' }};
+
+      function openPreviewTab() {{
+        window.open('{url_for("preview_latest")}', 'paperMorningPreview');
+      }}
+
+      function refreshTimeHorizonOptions(preserve) {{
+        const intentEl = document.getElementById('search-intent');
+        const horizonEl = document.getElementById('time-horizon');
+        const current = preserve ? horizonEl.value : '';
+        const intent = intentEl.value || 'best_match';
+        const options = TIME_HORIZON_OPTIONS[intent] || [];
+        horizonEl.innerHTML = '';
+        options.forEach((row) => {{
+          const option = document.createElement('option');
+          option.value = row.value;
+          option.textContent = row.label;
+          if (row.value === current) option.selected = true;
+          horizonEl.appendChild(option);
+        }});
+        if (!horizonEl.value && options.length) {{
+          horizonEl.value = options[0].value;
+        }}
+      }}
+
+      async function fetchStatus() {{
+        try {{
+          const res = await fetch('{url_for("jobs_status")}');
+          const data = await res.json();
+          renderStatus(data);
+        }} catch (err) {{
+          document.getElementById('job-message').textContent = 'Failed to load job status.';
+        }}
+      }}
+
+      function setButtonsDisabled(disabled) {{
+        ['btn-dry', 'btn-send', 'btn-reload', 'btn-task', 'btn-open-preview', 'btn-open-inbox'].forEach((id) => {{
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (id === 'btn-send' && {str(not uses_email_delivery).lower()}) {{
+            el.disabled = true;
+            return;
+          }}
+          el.disabled = disabled;
+        }});
+      }}
+
+      function renderStatus(data) {{
+        const p = Math.max(0, Math.min(100, Number(data.progress || 0)));
+        const running = Boolean(data.running);
+        const hasError = Boolean(data.error);
+        const kind = data.kind || 'none';
+        document.getElementById('job-progress').style.width = p + '%';
+        document.getElementById('status-started').textContent = data.started_at || '—';
+        document.getElementById('status-finished').textContent = data.finished_at || '—';
+        document.getElementById('job-message').textContent = data.status || '';
+        document.getElementById('job-error').textContent = data.error || '';
+        const badgeEl = document.getElementById('status-badge');
+        if (running) {{
+          badgeEl.innerHTML = `<span class="badge badge-running">🔵 Running — ${{JOB_LABEL[kind]}}</span>`;
+        }} else if (hasError) {{
+          badgeEl.innerHTML = '<span class="badge badge-danger">🔴 Failed</span>';
+        }} else {{
+          badgeEl.innerHTML = '<span class="badge badge-idle">⬜ Idle</span>';
+        }}
+        if (!running && !hasError && kind === 'dry_run' && previewWindow && !previewWindow.closed) {{
+          previewWindow.location.href = '{url_for("preview_latest")}';
+          previewWindow.focus();
+          previewWindow = null;
+        }}
+        setButtonsDisabled(running);
+      }}
+
+      function buildJobPayload(kind) {{
+        if (!['dry_run', 'send_now'].includes(kind)) return {{}};
+        return {{
+          search_intent: document.getElementById('search-intent').value || 'best_match',
+          time_horizon_key: document.getElementById('time-horizon').value || '1y'
+        }};
+      }}
+
+      async function startJob(kind) {{
+        if (kind === 'dry_run') {{
+          try {{
+            previewWindow = window.open('about:blank', 'paperMorningPreview');
+            if (previewWindow && previewWindow.document) {{
+              previewWindow.document.write('<!doctype html><html><head><title>Searching papers...</title></head><body style="font-family:sans-serif;padding:20px;">Searching papers for your saved context...<br/>This tab will update automatically when ready.</body></html>');
+              previewWindow.document.close();
+            }}
+          }} catch (err) {{
+            previewWindow = null;
+          }}
+        }}
+        try {{
+          const res = await fetch(`/jobs/start/${{kind}}`, {{
+            method: 'POST',
+            headers: {{
+              'Content-Type': 'application/json',
+              'X-App-Token': window.APP_TOKEN || '',
+            }},
+            body: JSON.stringify(buildJobPayload(kind)),
+          }});
+          const data = await res.json();
+          if (!res.ok) {{
+            alert(data.message || 'Failed to start task');
+            return;
+          }}
+          await fetchStatus();
+        }} catch (err) {{
+          alert('Failed to start task');
+        }}
+      }}
+
+      async function disconnectGoogleOauth() {{
+        if (!confirm('Disconnect Google OAuth?')) return;
+        try {{
+          const res = await fetch('{url_for("google_oauth_disconnect")}', {{
+            method: 'POST',
+            headers: {{ 'X-App-Token': window.APP_TOKEN || '' }},
+          }});
+          if (!res.ok) {{
+            alert('Failed to disconnect OAuth');
+            return;
+          }}
+          window.location.reload();
+        }} catch (err) {{
+          alert('Failed to disconnect OAuth');
+        }}
+      }}
+
+      document.getElementById('search-intent').addEventListener('change', () => refreshTimeHorizonOptions(false));
+      refreshTimeHorizonOptions(true);
+      fetchStatus();
+      setInterval(fetchStatus, 1200);
+      if ('{autorun_kind}') {{
+        setTimeout(() => startJob('{autorun_kind}'), 250);
+      }}
+    </script>
+    """
+    return body
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     env_map = read_env_map()
@@ -2814,6 +3215,8 @@ def setup():
             "SEND_MINUTE",
             "SEND_FREQUENCY",
             "SEND_ANCHOR_DATE",
+            "SEARCH_INTENT_DEFAULT",
+            "SEARCH_TIME_HORIZON_DEFAULT",
             "MAX_PAPERS",
             "OUTPUT_LANGUAGE",
             "WEB_PASSWORD",
@@ -2859,6 +3262,13 @@ def setup():
         if delivery_mode == "gmail_oauth":
             updated["ENABLE_GOOGLE_OAUTH"] = "true"
             updated["GOOGLE_OAUTH_USE_FOR_GMAIL"] = "true"
+        updated["SEARCH_INTENT_DEFAULT"] = normalize_search_intent(
+            updated.get("SEARCH_INTENT_DEFAULT", "best_match")
+        )
+        updated["SEARCH_TIME_HORIZON_DEFAULT"] = normalize_time_horizon_key(
+            updated.get("SEARCH_TIME_HORIZON_DEFAULT", "1y"),
+            updated["SEARCH_INTENT_DEFAULT"],
+        )
 
         for secret_key in {
             "GMAIL_APP_PASSWORD",
@@ -2992,7 +3402,7 @@ def setup():
         <p class="card-title">1) Delivery</p>
         <div class="settings-grid">
           <div class="settings-row">
-            <div class="settings-label"><strong>How should you receive digests?</strong><small>Local inbox is the easiest way to start.</small></div>
+            <div class="settings-label"><strong>How should you receive results?</strong><small>Local inbox is the easiest way to start.</small></div>
             <select name="DELIVERY_MODE" id="delivery_mode" style="width:240px;">
               <option value="local_inbox" {"selected" if delivery_mode == "local_inbox" else ""}>Local inbox (recommended)</option>
               <option value="gmail_oauth" {"selected" if delivery_mode == "gmail_oauth" else ""}>Gmail via Google sign-in</option>
@@ -3000,7 +3410,7 @@ def setup():
             </select>
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Open digest window automatically</strong><small>At the scheduled time, generate the digest and open it in your browser if this app is running.</small></div>
+            <div class="settings-label"><strong>Open result window automatically</strong><small>At the scheduled time, run the default search and open it in your browser if this app is running.</small></div>
             <input type="checkbox" name="AUTO_OPEN_DIGEST_WINDOW" {checked_auto_open_digest} />
           </div>
         </div>
@@ -3023,8 +3433,27 @@ def setup():
             <input type="text" name="PRIMARY_PROJECT_KEYWORDS" value="{html.escape(primary_project_keywords, quote=True)}" placeholder="e.g., colonoscopy, weak supervision, transformer" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Papers per digest</strong><small>MAX_PAPERS</small></div>
+            <div class="settings-label"><strong>Papers per result</strong><small>MAX_PAPERS</small></div>
             <input type="number" min="1" max="50" name="MAX_PAPERS" value="{esc('MAX_PAPERS')}" style="width:120px;" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Default search intent</strong><small>Used for local morning popup and the Home default</small></div>
+            <select name="SEARCH_INTENT_DEFAULT" style="width:180px;">
+              <option value="best_match" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "best_match" else ""}>Best Match</option>
+              <option value="whats_new" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "whats_new" else ""}>What's New</option>
+              <option value="discovery" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "discovery" else ""}>Discovery</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label"><strong>Default time horizon</strong><small>Used for local morning popup and the Home default</small></div>
+            <select name="SEARCH_TIME_HORIZON_DEFAULT" style="width:180px;">
+              <option value="7d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "7d" else ""}>Last 7 days</option>
+              <option value="30d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "30d" else ""}>Last 30 days</option>
+              <option value="180d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "180d" else ""}>Last 6 months</option>
+              <option value="1y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "1y" else ""}>Last 1 year</option>
+              <option value="3y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "3y" else ""}>Last 3 years</option>
+              <option value="5y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "5y" else ""}>Last 5 years</option>
+            </select>
           </div>
           <div class="settings-row">
             <div class="settings-label"><strong>Summary output language</strong><small>OUTPUT_LANGUAGE — e.g., en, ko, ja, es, fr</small></div>
@@ -3054,7 +3483,7 @@ def setup():
             <input type="text" name="TIMEZONE" value="{esc('TIMEZONE')}" />
           </div>
           <div class="settings-row">
-            <div class="settings-label"><strong>Digest time</strong><small>When to generate/open the morning digest</small></div>
+            <div class="settings-label"><strong>Morning popup time</strong><small>When to generate/open the default search result</small></div>
             <div>
               <input type="time" id="setup_send_time" value="{send_hour_padded}:{send_minute_padded}" onchange="splitSetupTime(this.value)" style="width:140px;" />
               <input type="hidden" name="SEND_HOUR" id="setup_send_hour" value="{esc('SEND_HOUR')}" />
@@ -3202,7 +3631,7 @@ def setup():
       </div>
 
       <div class="gap-8">
-        <button type="submit" name="after_save" value="preview">✅ Save and Preview Now</button>
+        <button type="submit" name="after_save" value="preview">✅ Save and Search Now</button>
         <button type="submit" name="after_save" value="save" class="btn-ghost">Save only</button>
       </div>
     </form>
@@ -3289,7 +3718,7 @@ def setup_healthcheck():
 
 @app.route("/")
 def home():
-    return render_page(APP_TITLE, build_home_body(), active_page="home")
+    return render_page(APP_TITLE, build_home_body_search_first(), active_page="home")
 
 
 @app.route("/inbox", methods=["GET"])
@@ -3309,18 +3738,18 @@ def inbox_page():
             for entry in entries
         )
     else:
-        rows = "<tr><td colspan='4' class='small'>No saved digests yet. Generate one from Home.</td></tr>"
+        rows = "<tr><td colspan='4' class='small'>No saved search results yet. Generate one from Home.</td></tr>"
 
     body = f"""
     <div class="page-header">
       <h1>Local Inbox</h1>
-      <p>Saved digest previews stored on this computer: <code>{html.escape(str(get_local_inbox_dir()))}</code></p>
+      <p>Saved search results stored on this computer: <code>{html.escape(str(get_local_inbox_dir()))}</code></p>
     </div>
     <div class="card">
       <table>
         <thead>
           <tr>
-            <th>Digest</th>
+            <th>Result</th>
             <th>Generated UTC</th>
             <th>Delivery Mode</th>
             <th>Papers</th>
@@ -3358,12 +3787,12 @@ def preview_latest():
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>Paper Morning Preview</title>
+        <title>Paper Morning Search Result</title>
       </head>
       <body style="font-family:sans-serif;background:#f8fafc;padding:28px;color:#0f172a;">
-        <h2 style="margin-top:0;">No preview available yet</h2>
-        <p>Run <b>Preview Now</b> first, then open this tab again.</p>
-        <p><a href="/">Back to Dashboard</a></p>
+        <h2 style="margin-top:0;">No search result available yet</h2>
+        <p>Run <b>Search Now</b> first, then open this tab again.</p>
+        <p><a href="/">Back to Search Dashboard</a></p>
       </body>
     </html>
     """
@@ -3385,7 +3814,22 @@ def jobs_start(kind: str):
                 }
             ), 409
 
-    ok, message = start_background_job(kind)
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    options: Dict[str, Any] = {}
+    if kind in {"dry_run", "send_now"}:
+        raw_search_intent = payload.get("search_intent")
+        raw_time_horizon_key = payload.get("time_horizon_key")
+        if raw_search_intent:
+            options["search_intent"] = normalize_search_intent(raw_search_intent)
+        if raw_time_horizon_key:
+            options["time_horizon_key"] = normalize_time_horizon_key(
+                raw_time_horizon_key,
+                options.get("search_intent", "best_match"),
+            )
+
+    ok, message = start_background_job(kind, options)
     code = 200 if ok else 409
     return jsonify({"ok": ok, "message": message}) , code
 
@@ -3431,6 +3875,13 @@ def settings():
                     request.form.get(key, "").strip() if key in request.form else env_map.get(key, "")
                 )
         updated["DELIVERY_MODE"] = normalize_delivery_mode(updated.get("DELIVERY_MODE", "local_inbox"))
+        updated["SEARCH_INTENT_DEFAULT"] = normalize_search_intent(
+            updated.get("SEARCH_INTENT_DEFAULT", "best_match")
+        )
+        updated["SEARCH_TIME_HORIZON_DEFAULT"] = normalize_time_horizon_key(
+            updated.get("SEARCH_TIME_HORIZON_DEFAULT", "1y"),
+            updated["SEARCH_INTENT_DEFAULT"],
+        )
         updated["ONBOARDING_MODE"] = "preview" if updated["DELIVERY_MODE"] == "local_inbox" else "daily"
         if updated["DELIVERY_MODE"] == "gmail_oauth":
             updated["ENABLE_GOOGLE_OAUTH"] = "true"
@@ -3522,7 +3973,7 @@ def settings():
           <div class="settings-row">
             <div class="settings-label">
               <strong>Auto-open Digest Window</strong>
-              <small>A scheduled run will open the latest digest in your browser when the local UI is running.</small>
+              <small>A scheduled run will open the latest search result in your browser when the local UI is running.</small>
             </div>
             <input type="checkbox" name="AUTO_OPEN_DIGEST_WINDOW" {auto_open_digest_checked} />
           </div>
@@ -3551,7 +4002,7 @@ def settings():
           <div class="settings-row">
             <div class="settings-label">
               <strong>Recipient Email</strong>
-              <small>RECIPIENT_EMAIL — destination email for digest reports</small>
+              <small>RECIPIENT_EMAIL — destination email for search result reports</small>
             </div>
             <input type="text" name="RECIPIENT_EMAIL" value="{esc('RECIPIENT_EMAIL')}" placeholder="recipient@example.com" />
           </div>
@@ -3635,8 +4086,8 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
-              <strong>Digest Time</strong>
-              <small>Local time for scheduled digest generation / popup</small>
+              <strong>Morning Popup Time</strong>
+              <small>Local time for scheduled search generation / popup</small>
             </div>
             <div>
               <input type="time" id="send_time_picker" value="{send_hour_padded}:{send_minute_padded}" onchange="splitTime(this.value)" style="width:140px;" />
@@ -3670,15 +4121,40 @@ def settings():
         <div class="settings-grid">
           <div class="settings-row">
             <div class="settings-label">
+              <strong>Default Search Intent</strong>
+              <small>SEARCH_INTENT_DEFAULT — used by scheduled popup and as the Home default</small>
+            </div>
+            <select name="SEARCH_INTENT_DEFAULT" style="width:180px;">
+              <option value="best_match" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "best_match" else ""}>Best Match</option>
+              <option value="whats_new" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "whats_new" else ""}>What's New</option>
+              <option value="discovery" {"selected" if normalize_search_intent(env_map.get("SEARCH_INTENT_DEFAULT", "best_match")) == "discovery" else ""}>Discovery</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Default Time Horizon</strong>
+              <small>SEARCH_TIME_HORIZON_DEFAULT — used by scheduled popup and as the Home default</small>
+            </div>
+            <select name="SEARCH_TIME_HORIZON_DEFAULT" style="width:180px;">
+              <option value="7d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "7d" else ""}>Last 7 days</option>
+              <option value="30d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "30d" else ""}>Last 30 days</option>
+              <option value="180d" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "180d" else ""}>Last 6 months</option>
+              <option value="1y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "1y" else ""}>Last 1 year</option>
+              <option value="3y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "3y" else ""}>Last 3 years</option>
+              <option value="5y" {"selected" if env_map.get("SEARCH_TIME_HORIZON_DEFAULT", "1y") == "5y" else ""}>Last 5 years</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
               <strong>Lookback Window (Hours)</strong>
-              <small>LOOKBACK_HOURS — collect papers within the last N hours</small>
+              <small>LOOKBACK_HOURS — legacy fallback window for digest-style collection</small>
             </div>
             <input type="number" name="LOOKBACK_HOURS" min="1" value="{esc('LOOKBACK_HOURS')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">
               <strong>Max Papers</strong>
-              <small>MAX_PAPERS — max papers included in each digest</small>
+              <small>MAX_PAPERS — max papers included in each search result or email</small>
             </div>
             <input type="number" name="MAX_PAPERS" min="1" value="{esc('MAX_PAPERS')}" style="width:120px;" />
           </div>
@@ -4410,7 +4886,7 @@ def logs_page():
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Paper Digest local web console.")
+    parser = argparse.ArgumentParser(description="Paper Morning local search console.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5050)
     return parser.parse_args()
