@@ -6,6 +6,32 @@ Note:
 - Repository history does not contain a public `0.6.0` version bump.
 - The preview-first and local-inbox transition work from that period was folded into `0.7.0`.
 
+## [0.7.1] - 2026-04-03
+
+### Added
+- Added the first complete local agent interface for `2-2`:
+  - local-only HTTP JSON endpoint: `POST /api/agent/search`
+  - CLI JSON mode: `python app/paper_digest_app.py --agent-search ...`
+  - separate `AGENT_API_TOKEN` broker token so agents do not need raw provider keys
+- Added OPENAI-compatible local/self-hosted backend support for agent-oriented use:
+  - `ENABLE_OPENAI_COMPAT_FALLBACK`
+  - `OPENAI_COMPAT_API_BASE`
+  - `OPENAI_COMPAT_MODEL`
+  - `OPENAI_COMPAT_API_KEY`
+- Added dedicated agent manuals:
+  - `docs/manuals/MANUAL_AGENT_EN.md`
+  - `docs/manuals/MANUAL_AGENT_KR.md`
+
+### Changed
+- Reorganized the English and Korean README front sections around the current product direction:
+  - `2-1` human on-demand search
+  - `2-2` agent-oriented search
+- Moved older delivery/automation paths such as email and GitHub Actions lower in the README as optional workflows.
+- Settings UI now exposes agent-mode controls and OPENAI-compatible backend settings.
+
+### Docs
+- Updated README, Korean README, and manual cross-links to reflect the search-first + agent-tool product framing.
+
 ## [0.7.0] - 2026-04-02
 
 ### Added
