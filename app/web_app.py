@@ -34,6 +34,7 @@ from flask import (
 
 from paper_digest_app import (
     CEREBRAS_API_BASE_DEFAULT,
+    OPENAI_COMPAT_API_BASE_DEFAULT,
     bootstrap_runtime_files,
     compute_internal_schedule_time,
     delivery_mode_label,
@@ -57,6 +58,7 @@ from paper_digest_app import (
     resolve_secret_value,
     resolve_env_path,
     run_digest,
+    search_papers_for_agent,
     setup_logging,
     store_secret_value,
     mask_sensitive_text,
@@ -89,6 +91,7 @@ APP_TITLE = f"Paper Morning Local Console v{APP_VERSION}"
 SCHEDULER_JOB_ID = "paper-morning-local-job"
 SESSION_SECRET_ENV_KEY = "WEB_APP_SECRET_KEY"
 AUTH_TOKEN_ENV_KEY = "WEB_APP_AUTH_TOKEN"
+AGENT_AUTH_TOKEN_ENV_KEY = "AGENT_API_TOKEN"
 WEB_AUTH_SESSION_KEY = "pm_auth_ok"
 UI_LANGUAGE_SESSION_KEY = "pm_ui_lang"
 GEMINI_API_URL_TEMPLATE = (
@@ -150,12 +153,17 @@ EXPECTED_ENV_KEYS = [
     "GOOGLE_OAUTH_CONNECTED_EMAIL",
     "GOOGLE_OAUTH_REDIRECT_URI",
     "SETUP_WIZARD_COMPLETED",
+    "AGENT_API_TOKEN",
     "SEND_NOW_COOLDOWN_SECONDS",
     "SENT_HISTORY_DAYS",
     "ENABLE_LLM_AGENT",
     "GEMINI_API_KEY",
     "ENABLE_GEMINI_ADVANCED_REASONING",
     "GEMINI_MODEL",
+    "ENABLE_OPENAI_COMPAT_FALLBACK",
+    "OPENAI_COMPAT_API_KEY",
+    "OPENAI_COMPAT_MODEL",
+    "OPENAI_COMPAT_API_BASE",
     "OUTPUT_LANGUAGE",
     "ENABLE_CEREBRAS_FALLBACK",
     "CEREBRAS_API_KEY",
@@ -209,12 +217,17 @@ DEFAULT_ENV_VALUES = {
     "GOOGLE_OAUTH_CONNECTED_EMAIL": "",
     "GOOGLE_OAUTH_REDIRECT_URI": "",
     "SETUP_WIZARD_COMPLETED": "false",
+    "AGENT_API_TOKEN": "",
     "SEND_NOW_COOLDOWN_SECONDS": "300",
     "SENT_HISTORY_DAYS": "14",
     "ENABLE_LLM_AGENT": "true",
     "GEMINI_API_KEY": "",
     "ENABLE_GEMINI_ADVANCED_REASONING": "true",
     "GEMINI_MODEL": "gemini-3.1-flash",
+    "ENABLE_OPENAI_COMPAT_FALLBACK": "false",
+    "OPENAI_COMPAT_API_KEY": "",
+    "OPENAI_COMPAT_MODEL": "",
+    "OPENAI_COMPAT_API_BASE": OPENAI_COMPAT_API_BASE_DEFAULT,
     "OUTPUT_LANGUAGE": "en",
     "ENABLE_CEREBRAS_FALLBACK": "true",
     "CEREBRAS_API_KEY": "",
@@ -229,10 +242,12 @@ DEFAULT_ENV_VALUES = {
 SECRET_ENV_KEYS = {
     "GMAIL_APP_PASSWORD",
     "GEMINI_API_KEY",
+    "OPENAI_COMPAT_API_KEY",
     "CEREBRAS_API_KEY",
     "SEMANTIC_SCHOLAR_API_KEY",
     "GOOGLE_SCHOLAR_API_KEY",
     "WEB_PASSWORD",
+    "AGENT_API_TOKEN",
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "GOOGLE_OAUTH_REFRESH_TOKEN",
 }
@@ -1016,12 +1031,97 @@ def has_google_oauth_gmail_ready(env_map: Dict[str, str]) -> bool:
 
 def is_local_host(host: str) -> bool:
     lowered = str(host or "").strip().lower()
-    return lowered in {"127.0.0.1", "localhost", "::1"}
+    return lowered in {"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1"}
 
 
 def get_web_password(env_map: Dict[str, str] | None = None) -> str:
     values = env_map or read_env_map()
     return resolve_secret_value("WEB_PASSWORD", str(values.get("WEB_PASSWORD", "") or ""))
+
+
+def get_agent_api_token(env_map: Dict[str, str] | None = None) -> str:
+    values = env_map or read_env_map()
+    return resolve_secret_value(
+        AGENT_AUTH_TOKEN_ENV_KEY,
+        os.getenv(AGENT_AUTH_TOKEN_ENV_KEY, str(values.get(AGENT_AUTH_TOKEN_ENV_KEY, "") or "")),
+    )
+
+
+def is_local_request() -> bool:
+    candidates: List[str] = []
+    try:
+        if request.access_route:
+            candidates.extend(str(item or "").strip() for item in request.access_route)
+    except Exception:
+        pass
+    candidates.append(str(request.remote_addr or "").strip())
+    filtered = [item for item in candidates if item]
+    if not filtered:
+        return True
+    return all(is_local_host(item) for item in filtered)
+
+
+def extract_bearer_token(header_value: str) -> str:
+    raw = str(header_value or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip()
+    return ""
+
+
+def get_agent_request_token() -> str:
+    bearer = extract_bearer_token(request.headers.get("Authorization", ""))
+    if bearer:
+        return bearer
+
+    header_token = request.headers.get("X-Agent-Token", "").strip()
+    if header_token:
+        return header_token
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            for key in ("agent_token", "agent_api_token"):
+                value = str(payload.get(key, "") or "").strip()
+                if value:
+                    return value
+    return ""
+
+
+def normalize_keywords_input(raw: Any) -> List[str]:
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, str):
+        items = [part.strip() for part in raw.split(",")]
+    else:
+        items = []
+    seen = set()
+    normalized: List[str] = []
+    for item in items:
+        value = str(item or "").strip()
+        lowered = value.lower()
+        if not value or lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(value)
+    return normalized
+
+
+def normalize_agent_source_policy(raw: Any) -> Dict[str, bool]:
+    if not isinstance(raw, dict):
+        return {}
+    normalized: Dict[str, bool] = {}
+    for key in ("arxiv", "pubmed", "semantic_scholar", "google_scholar"):
+        if key not in raw:
+            continue
+        value = raw.get(key)
+        if isinstance(value, bool):
+            normalized[key] = value
+        else:
+            normalized[key] = env_truthy(str(value))
+    return normalized
 
 
 def ensure_host_security(host: str, env_map: Dict[str, str] | None = None) -> None:
@@ -1619,6 +1719,12 @@ def build_settings_warnings(env_map: Dict[str, str]) -> List[str]:
         ):
             warnings.append("ENABLE_GOOGLE_SCHOLAR=true but GOOGLE_SCHOLAR_API_KEY is empty.")
 
+    if env_truthy(str(env_map.get("ENABLE_OPENAI_COMPAT_FALLBACK", "false"))):
+        if not str(env_map.get("OPENAI_COMPAT_API_BASE", "")).strip():
+            warnings.append("ENABLE_OPENAI_COMPAT_FALLBACK=true but OPENAI_COMPAT_API_BASE is empty.")
+        if not str(env_map.get("OPENAI_COMPAT_MODEL", "")).strip():
+            warnings.append("ENABLE_OPENAI_COMPAT_FALLBACK=true but OPENAI_COMPAT_MODEL is empty.")
+
     return warnings
 
 
@@ -1697,13 +1803,14 @@ def register_windows_scheduled_task() -> Tuple[bool, str]:
 @app.before_request
 def verify_local_post_token():
     env_map = read_env_map()
+    is_agent_request = request.path.startswith("/api/agent/")
 
-    if should_force_setup(request.path, env_map):
+    if not is_agent_request and should_force_setup(request.path, env_map):
         if request.path != url_for("setup"):
             return redirect(url_for("setup"))
 
     web_password = get_web_password(env_map)
-    if web_password and not session.get(WEB_AUTH_SESSION_KEY):
+    if web_password and not session.get(WEB_AUTH_SESSION_KEY) and not is_agent_request:
         if (
             request.path != url_for("login")
             and not request.path.startswith("/static/")
@@ -1715,6 +1822,9 @@ def verify_local_post_token():
             return redirect(url_for("login", next=request.path))
 
     if request.method != "POST":
+        return None
+
+    if is_agent_request:
         return None
 
     if request.path == url_for("login"):
@@ -3248,6 +3358,7 @@ def setup():
                 "AUTO_OPEN_DIGEST_WINDOW",
                 "ENABLE_LLM_AGENT",
                 "ENABLE_GEMINI_ADVANCED_REASONING",
+                "ENABLE_OPENAI_COMPAT_FALLBACK",
                 "ENABLE_CEREBRAS_FALLBACK",
                 "ENABLE_SEMANTIC_SCHOLAR",
                 "ENABLE_GOOGLE_SCHOLAR",
@@ -3839,6 +3950,86 @@ def jobs_status():
     return jsonify(get_job_state_snapshot())
 
 
+@app.route("/api/agent/search", methods=["POST"])
+def api_agent_search():
+    if not is_local_request():
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Agent search is available only from the local machine.",
+                }
+            ),
+            403,
+        )
+
+    env_map = read_env_map()
+    expected_token = get_agent_api_token(env_map)
+    if not expected_token:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "AGENT_API_TOKEN is not configured. Set it in .env or keyring first.",
+                }
+            ),
+            503,
+        )
+
+    presented_token = get_agent_request_token()
+    if not presented_token or not secrets.compare_digest(presented_token, expected_token):
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"status": "error", "message": "Expected a JSON object body."}), 400
+
+    project_name = str(payload.get("project_name", "") or "").strip()
+    research_context = str(payload.get("research_context", "") or "").strip()
+    if not research_context:
+        return jsonify({"status": "error", "message": "research_context is required."}), 400
+
+    search_intent = normalize_search_intent(payload.get("search_intent", "best_match"))
+    time_horizon_key = normalize_time_horizon_key(
+        payload.get("time_horizon", "1y"),
+        search_intent,
+    )
+    keywords = normalize_keywords_input(payload.get("keywords", []))
+    include_diagnostics = env_truthy(str(payload.get("include_diagnostics", "false")))
+    output_language = str(payload.get("output_language", "") or "").strip() or None
+    model = str(payload.get("model", "") or "").strip() or None
+    source_policy = normalize_agent_source_policy(payload.get("source_policy"))
+
+    try:
+        top_k = int(payload.get("top_k", 10))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "top_k must be an integer."}), 400
+    top_k = max(1, min(top_k, 50))
+
+    try:
+        config = load_config(require_email_credentials=False)
+        result = search_papers_for_agent(
+            config,
+            project_name=project_name,
+            research_context=research_context,
+            keywords=keywords,
+            search_intent=search_intent,
+            time_horizon_key=time_horizon_key,
+            top_k=top_k,
+            output_language=output_language,
+            model=model,
+            include_diagnostics=include_diagnostics,
+            source_policy=source_policy,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": safe_exception_text(exc)}), 400
+    except Exception as exc:
+        logging.exception("Agent search failed.")
+        return jsonify({"status": "error", "message": safe_exception_text(exc)}), 500
+
+    return jsonify(result)
+
+
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
     env_map = read_env_map()
@@ -3903,6 +4094,9 @@ def settings():
     gemini_advanced_checked = (
         "checked" if env_truthy(env_map.get("ENABLE_GEMINI_ADVANCED_REASONING", "true")) else ""
     )
+    openai_compat_checked = (
+        "checked" if env_truthy(env_map.get("ENABLE_OPENAI_COMPAT_FALLBACK", "false")) else ""
+    )
     cerebras_checked = "checked" if env_truthy(env_map.get("ENABLE_CEREBRAS_FALLBACK", "false")) else ""
     semantic_checked = "checked" if env_truthy(env_map.get("ENABLE_SEMANTIC_SCHOLAR", "true")) else ""
     google_scholar_checked = "checked" if env_truthy(env_map.get("ENABLE_GOOGLE_SCHOLAR", "false")) else ""
@@ -3930,6 +4124,9 @@ def settings():
         oauth_settings_controls_html = ""
     send_hour_padded = str(env_map.get("SEND_HOUR", "9")).zfill(2)
     send_minute_padded = str(env_map.get("SEND_MINUTE", "0")).zfill(2)
+    agent_token_configured = bool(get_agent_api_token(env_map))
+    agent_token_status = "Configured" if agent_token_configured else "Not configured"
+    agent_endpoint_url = "http://127.0.0.1:5050/api/agent/search"
 
     def esc(key: str) -> str:
         return html.escape(env_map.get(key, ""), quote=True)
@@ -4272,6 +4469,34 @@ def settings():
           </div>
           <div class="settings-row">
             <div class="settings-label">
+              <strong>Enable OPENAI-Compatible Backend</strong>
+              <small>ENABLE_OPENAI_COMPAT_FALLBACK — use a local or self-hosted OpenAI-style server such as LM Studio, vLLM, or an Ollama bridge.</small>
+            </div>
+            <input type="checkbox" name="ENABLE_OPENAI_COMPAT_FALLBACK" {openai_compat_checked} />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>OPENAI-Compatible API Base</strong>
+              <small>OPENAI_COMPAT_API_BASE — example: <code>http://127.0.0.1:1234/v1</code></small>
+            </div>
+            <input type="text" name="OPENAI_COMPAT_API_BASE" value="{esc('OPENAI_COMPAT_API_BASE')}" placeholder="http://127.0.0.1:1234/v1" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>OPENAI-Compatible Model</strong>
+              <small>OPENAI_COMPAT_MODEL — example: qwen2.5-14b-instruct</small>
+            </div>
+            <input type="text" name="OPENAI_COMPAT_MODEL" value="{esc('OPENAI_COMPAT_MODEL')}" placeholder="qwen2.5-14b-instruct" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>OPENAI-Compatible API Key</strong>
+              <small>OPENAI_COMPAT_API_KEY — leave blank if your local server does not require Authorization. Leave blank to keep current value.</small>
+            </div>
+            <input type="password" name="OPENAI_COMPAT_API_KEY" value="" placeholder="Optional bearer token" autocomplete="new-password" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
               <strong>Enable Cerebras Fallback</strong>
               <small>ENABLE_CEREBRAS_FALLBACK — auto fallback when Gemini fails</small>
             </div>
@@ -4339,6 +4564,40 @@ def settings():
               <small>LLM_MAX_CANDIDATES — default 30, max 80 (nonlinear expansion for longer frequencies)</small>
             </div>
             <input type="number" name="LLM_MAX_CANDIDATES" min="1" max="80" value="{esc('LLM_MAX_CANDIDATES')}" style="width:120px;" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">🧰 Agent API Settings</p>
+        <p class="small" style="margin:0 0 12px;">Use this when an external local agent should call Paper Morning without seeing your Gemini or local model provider key.</p>
+        <div class="settings-grid">
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Agent API Token</strong>
+              <small>AGENT_API_TOKEN — local broker token for <code>POST /api/agent/search</code>. Give this to your agent, not your provider key. Leave blank to keep current value.</small>
+            </div>
+            <input type="password" name="AGENT_API_TOKEN" value="" placeholder="Local agent token" autocomplete="new-password" />
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Agent Endpoint</strong>
+              <small>Local only. Requests from non-loopback hosts are rejected.</small>
+            </div>
+            <div>
+              <code>{html.escape(agent_endpoint_url)}</code>
+              <div class="small" style="margin-top:6px;">Token status: <strong>{agent_token_status}</strong></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-label">
+              <strong>Usage Notes</strong>
+              <small>CLI and HTTP examples are documented in the dedicated agent manuals.</small>
+            </div>
+            <div class="small" style="line-height:1.7;">
+              <div><code>docs/manuals/MANUAL_AGENT_EN.md</code></div>
+              <div><code>docs/manuals/MANUAL_AGENT_KR.md</code></div>
+            </div>
           </div>
         </div>
       </div>

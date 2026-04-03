@@ -88,6 +88,7 @@ python app/local_ui_launcher.py
 ## 빠른 링크
 - 초보자 가이드: [MANUAL_FIRSTTIME_KR.md](./MANUAL_FIRSTTIME_KR.md)
 - 고급 운영/자동화: [MANUAL_KR.md](./MANUAL_KR.md)
+- 에이전트/툴 연동: [MANUAL_AGENT_KR.md](./MANUAL_AGENT_KR.md)
 - English README: [../../README.md](../../README.md)
 
 ## 문의

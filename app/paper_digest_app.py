@@ -10,7 +10,7 @@ import smtplib
 import stat
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -42,6 +42,7 @@ GEMINI_API_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 CEREBRAS_API_BASE_DEFAULT = "https://api.cerebras.ai/v1"
+OPENAI_COMPAT_API_BASE_DEFAULT = ""
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SEND_API_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 
@@ -369,6 +370,10 @@ class AppConfig:
     enable_llm_agent: bool
     gemini_api_key: str
     gemini_model: str
+    openai_compat_api_key: str
+    openai_compat_model: str
+    openai_compat_api_base: str
+    enable_openai_compat_fallback: bool
     cerebras_api_key: str
     cerebras_model: str
     cerebras_api_base: str
@@ -574,6 +579,19 @@ def setup_logging() -> None:
 
 def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
+
+
+def coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = clean_text(str(value or "")).lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def parse_arxiv_datetime(value: str) -> datetime:
@@ -1299,6 +1317,80 @@ def load_topic_configuration(
     )
 
 
+def sanitize_generated_topics(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_topics = payload.get("topics", []) if isinstance(payload, dict) else []
+    if not isinstance(raw_topics, list):
+        return []
+
+    result: List[Dict[str, Any]] = []
+    for item in raw_topics:
+        if not isinstance(item, dict):
+            continue
+        name = clean_text(str(item.get("name", "")))
+        keywords_raw = item.get("keywords", [])
+        if isinstance(keywords_raw, str):
+            keywords = [part.strip() for part in keywords_raw.split(",") if part.strip()]
+        elif isinstance(keywords_raw, list):
+            keywords = [clean_text(str(part)) for part in keywords_raw if clean_text(str(part))]
+        else:
+            keywords = []
+        keywords = dedupe_list(keywords)[:12]
+        if not name or not keywords:
+            continue
+        result.append(
+            {
+                "name": name,
+                "keywords": keywords,
+                "relevance_mode": normalize_relevance_mode(item.get("relevance_mode", LLM_RELEVANCE_MODE_DEFAULT)),
+                "arxiv_query": clean_text(str(item.get("arxiv_query", ""))),
+                "pubmed_query": clean_text(str(item.get("pubmed_query", ""))),
+                "semantic_scholar_query": clean_text(str(item.get("semantic_scholar_query", ""))),
+                "google_scholar_query": clean_text(str(item.get("google_scholar_query", ""))),
+            }
+        )
+    return result
+
+
+def generate_topics_from_projects(config: AppConfig, projects: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    project_json = json.dumps(projects, ensure_ascii=False)
+    prompt = (
+        "You are helping configure a research-context paper search tool.\n"
+        "For each project, generate one precise topic row with: name, keywords, arxiv_query, pubmed_query, "
+        "semantic_scholar_query, google_scholar_query, relevance_mode.\n"
+        "Return ONLY JSON object with schema:\n"
+        "{\n"
+        '  "topics": [\n'
+        "    {\n"
+        '      "name": "...",\n'
+        '      "keywords": ["..."],\n'
+        '      "relevance_mode": "balanced",\n'
+        '      "arxiv_query": "...",\n'
+        '      "pubmed_query": "...",\n'
+        '      "semantic_scholar_query": "...",\n'
+        '      "google_scholar_query": "..."\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "Rules:\n"
+        "- create exactly one topic per project\n"
+        "- keyword list length: 5..10\n"
+        "- arXiv query must use all: terms and remain moderately broad\n"
+        "- PubMed query should use boolean and quoted phrases where useful\n"
+        "- Semantic Scholar query should be concise plain text\n"
+        "- Google Scholar query should be concise plain text\n"
+        "- default relevance_mode to balanced unless the project is clearly narrow or clearly exploratory\n"
+        "- keep response machine-parseable JSON only\n\n"
+        f"Projects JSON:\n{project_json}"
+    )
+    llm_response = call_llm_json(config, prompt, temperature=0.2)
+    if not isinstance(llm_response, dict):
+        raise ValueError("Topic generation returned invalid response format.")
+    topics = sanitize_generated_topics(llm_response)
+    if not topics:
+        raise ValueError("Topic generation returned no usable topic rows.")
+    return topics
+
+
 def score_paper(
     title: str,
     abstract: str,
@@ -1756,12 +1848,80 @@ def call_cerebras_json(config: AppConfig, prompt: str, temperature: float = 0.2)
     return parse_json_loose(llm_text)
 
 
+def can_use_openai_compat_provider(config: AppConfig) -> bool:
+    return (
+        config.enable_openai_compat_fallback
+        and bool(clean_text(config.openai_compat_api_base))
+        and bool(clean_text(config.openai_compat_model))
+    )
+
+
+def call_openai_compatible_json(config: AppConfig, prompt: str, temperature: float = 0.2) -> Any:
+    if not can_use_openai_compat_provider(config):
+        raise ValueError("OPENAI-compatible provider is not configured.")
+
+    base_url = (config.openai_compat_api_base or OPENAI_COMPAT_API_BASE_DEFAULT).strip().rstrip("/")
+    if not base_url:
+        raise ValueError("OPENAI_COMPAT_API_BASE is missing.")
+    url = f"{base_url}/chat/completions"
+
+    payload = {
+        "model": config.openai_compat_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {"Content-Type": "application/json"}
+    if config.openai_compat_api_key:
+        headers["Authorization"] = f"Bearer {config.openai_compat_api_key}"
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=CEREBRAS_TIMEOUT_SECONDS,
+    )
+    if response.status_code in {400, 404, 422}:
+        fallback_payload = dict(payload)
+        fallback_payload.pop("response_format", None)
+        response = requests.post(
+            url,
+            headers=headers,
+            json=fallback_payload,
+            timeout=CEREBRAS_TIMEOUT_SECONDS,
+        )
+    response.raise_for_status()
+
+    response_payload = response.json()
+    choices = response_payload.get("choices", [])
+    if not choices:
+        raise ValueError("No choices returned from OPENAI-compatible API.")
+
+    message = choices[0].get("message", {})
+    content = message.get("content", "")
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+        llm_text = "\n".join(parts)
+    else:
+        llm_text = str(content or "")
+    return parse_json_loose(llm_text)
+
+
 def can_use_cerebras_fallback(config: AppConfig) -> bool:
     return bool(config.cerebras_api_key) and config.enable_cerebras_fallback
 
 
 def has_llm_provider(config: AppConfig) -> bool:
-    return bool(config.gemini_api_key) or can_use_cerebras_fallback(config)
+    return (
+        bool(config.gemini_api_key)
+        or can_use_openai_compat_provider(config)
+        or can_use_cerebras_fallback(config)
+    )
 
 
 def call_llm_json(config: AppConfig, prompt: str, temperature: float = 0.2) -> Any:
@@ -1773,7 +1933,18 @@ def call_llm_json(config: AppConfig, prompt: str, temperature: float = 0.2) -> A
         except Exception as exc:
             safe_error = mask_sensitive_text(str(exc))
             errors.append(f"Gemini failed: {safe_error}")
-            logging.warning("Gemini call failed. Trying Cerebras fallback if enabled: %s", safe_error)
+            logging.warning(
+                "Gemini call failed. Trying configured fallback providers if enabled: %s",
+                safe_error,
+            )
+
+    if can_use_openai_compat_provider(config):
+        try:
+            return call_openai_compatible_json(config, prompt, temperature=temperature)
+        except Exception as exc:
+            safe_error = mask_sensitive_text(str(exc))
+            errors.append(f"OpenAI-compatible failed: {safe_error}")
+            logging.warning("OpenAI-compatible call failed: %s", safe_error)
 
     if can_use_cerebras_fallback(config):
         try:
@@ -1787,7 +1958,7 @@ def call_llm_json(config: AppConfig, prompt: str, temperature: float = 0.2) -> A
         raise RuntimeError("; ".join(errors))
 
     raise ValueError(
-        "No LLM provider available. Configure GEMINI_API_KEY or enable Cerebras fallback with CEREBRAS_API_KEY."
+        "No LLM provider available. Configure GEMINI_API_KEY, an OPENAI-compatible backend, or Cerebras fallback."
     )
 
 
@@ -3345,9 +3516,235 @@ def collect_and_rank_papers(
         f"{search_request.intent_label} searched {stats.window_used_label or search_request.time_horizon_label} "
         f"using {selected_plan_label or 'saved topic queries'}."
     )
+    if not ranked:
+        stats.no_results_reason = "below_threshold"
+        stats.search_notice = (
+            f"Candidates were retrieved in {stats.window_used_label or search_request.time_horizon_label}, "
+            "but none passed the relevance threshold."
+        )
     logging.info("Relevant papers selected: %d", len(ranked))
     emit_progress(progress_callback, "Paper ranking completed.", 90)
     return ranked, stats
+
+
+def build_agent_projects_input(
+    project_name: str,
+    research_context: str,
+    keywords: List[str],
+) -> List[Dict[str, str]]:
+    merged_context = clean_text(research_context)
+    keywords = [clean_text(str(item)) for item in keywords if clean_text(str(item))]
+    if keywords:
+        merged_context = (
+            f"{merged_context} | Keywords: {', '.join(keywords)}"
+            if merged_context
+            else f"Keywords: {', '.join(keywords)}"
+        )
+    return [{"name": clean_text(project_name) or "Untitled project", "context": merged_context}]
+
+
+def build_topic_profiles_from_generated_topics(topics: List[Dict[str, Any]]) -> List[TopicProfile]:
+    profiles: List[TopicProfile] = []
+    for topic in topics:
+        if not isinstance(topic, dict):
+            continue
+        name = clean_text(str(topic.get("name", "")))
+        keyword_weights = coerce_keyword_weights(topic.get("keywords", []))
+        relevance_mode = normalize_relevance_mode(topic.get("relevance_mode", LLM_RELEVANCE_MODE_DEFAULT))
+        if not name or not keyword_weights:
+            continue
+        profiles.append(TopicProfile(name=name, keywords=keyword_weights, relevance_mode=relevance_mode))
+    return profiles
+
+
+def clone_config_for_agent_request(
+    base_config: AppConfig,
+    project_name: str,
+    research_context: str,
+    keywords: List[str],
+    generated_topics: List[Dict[str, Any]],
+    top_k: int,
+    output_language: str | None = None,
+    model: str | None = None,
+    source_policy: Dict[str, Any] | None = None,
+) -> AppConfig:
+    topic_profiles = build_topic_profiles_from_generated_topics(generated_topics)
+    arxiv_queries = dedupe_list(
+        [clean_text(str(topic.get("arxiv_query", ""))) for topic in generated_topics if clean_text(str(topic.get("arxiv_query", "")))]
+    )
+    pubmed_queries = dedupe_list(
+        [clean_text(str(topic.get("pubmed_query", ""))) for topic in generated_topics if clean_text(str(topic.get("pubmed_query", "")))]
+    )
+    semantic_queries = dedupe_list(
+        [clean_text(str(topic.get("semantic_scholar_query", ""))) for topic in generated_topics if clean_text(str(topic.get("semantic_scholar_query", "")))]
+    )
+    google_queries = dedupe_list(
+        [clean_text(str(topic.get("google_scholar_query", ""))) for topic in generated_topics if clean_text(str(topic.get("google_scholar_query", "")))]
+    )
+    requested_output_language = normalize_output_language(output_language or base_config.output_language)
+    normalized_keywords = [clean_text(str(item)) for item in keywords if clean_text(str(item))]
+    source_policy = source_policy or {}
+    use_arxiv = coerce_bool(source_policy.get("arxiv"), True)
+    use_pubmed = coerce_bool(source_policy.get("pubmed"), True)
+    use_semantic_scholar = coerce_bool(
+        source_policy.get("semantic_scholar"),
+        base_config.enable_semantic_scholar,
+    )
+    use_google_scholar = coerce_bool(
+        source_policy.get("google_scholar"),
+        base_config.enable_google_scholar,
+    )
+    requested_model = clean_text(model)
+    return replace(
+        base_config,
+        research_projects=[
+            ResearchProject(
+                name=clean_text(project_name) or "Untitled project",
+                context=build_agent_projects_input(project_name, research_context, normalized_keywords)[0]["context"],
+                send_frequency="daily",
+                send_interval_days=1,
+            )
+        ],
+        topic_profiles=topic_profiles,
+        arxiv_queries=arxiv_queries if use_arxiv else [],
+        pubmed_queries=pubmed_queries if use_pubmed else [],
+        semantic_scholar_queries=semantic_queries,
+        google_scholar_queries=google_queries,
+        enable_semantic_scholar=use_semantic_scholar,
+        enable_google_scholar=use_google_scholar,
+        max_papers=max(1, min(50, int(top_k))),
+        output_language=requested_output_language,
+        gemini_model=requested_model or base_config.gemini_model,
+        openai_compat_model=requested_model or base_config.openai_compat_model,
+        cerebras_model=requested_model or base_config.cerebras_model,
+    )
+
+
+def map_agent_status(stats: DigestStats, papers: List[Paper]) -> str:
+    if papers:
+        return "ok"
+    if stats.no_results_reason == "outside_horizon":
+        return "outside_horizon"
+    if stats.no_results_reason == "below_threshold":
+        return "below_threshold"
+    if stats.no_results_reason in {"none_retrieved", "no_candidates"}:
+        return "no_candidates"
+    return "error"
+
+
+def describe_agent_llm_backend(config: AppConfig) -> Dict[str, str]:
+    if config.gemini_api_key:
+        return {"provider": "gemini", "model": config.gemini_model}
+    if can_use_openai_compat_provider(config):
+        return {"provider": "openai_compatible", "model": config.openai_compat_model}
+    if can_use_cerebras_fallback(config):
+        return {"provider": "cerebras", "model": config.cerebras_model}
+    return {"provider": "none", "model": ""}
+
+
+def search_papers_for_agent(
+    config: AppConfig,
+    project_name: str,
+    research_context: str,
+    keywords: List[str] | None = None,
+    search_intent: str = "best_match",
+    time_horizon_key: str = "1y",
+    top_k: int = 10,
+    output_language: str | None = None,
+    model: str | None = None,
+    include_diagnostics: bool = False,
+    source_policy: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    normalized_context = clean_text(research_context)
+    if not normalized_context:
+        raise ValueError("research_context is required.")
+
+    normalized_keywords = [clean_text(str(item)) for item in (keywords or []) if clean_text(str(item))]
+    llm_projects = build_agent_projects_input(project_name, normalized_context, normalized_keywords)
+    generated_topics = generate_topics_from_projects(config, llm_projects)
+    request_config = clone_config_for_agent_request(
+        config,
+        project_name=project_name,
+        research_context=normalized_context,
+        keywords=normalized_keywords,
+        generated_topics=generated_topics,
+        top_k=top_k,
+        output_language=output_language,
+        model=model,
+        source_policy=source_policy,
+    )
+    search_request = resolve_search_request(
+        request_config,
+        search_intent=search_intent,
+        time_horizon_key=time_horizon_key,
+    )
+    now_utc = datetime.now(timezone.utc)
+    ranked, stats = collect_and_rank_papers(request_config, now_utc, search_request)
+    papers = ranked[: request_config.max_papers]
+    primary_topic = generated_topics[0] if generated_topics else {}
+    backend = describe_agent_llm_backend(request_config)
+    return {
+        "status": map_agent_status(stats, papers),
+        "request": {
+            "project_name": clean_text(project_name) or llm_projects[0]["name"],
+            "search_intent": search_request.intent,
+            "time_horizon": search_request.time_horizon_key,
+            "top_k": request_config.max_papers,
+            "output_language": request_config.output_language,
+        },
+        "meta": {
+            "intent_label": search_request.intent_label,
+            "requested_horizon_label": search_request.time_horizon_label,
+            "window_used_label": stats.window_used_label or search_request.time_horizon_label,
+            "query_plan_label": stats.query_plan_label or "generated topic queries",
+            "used_provider": backend["provider"],
+            "used_model": backend["model"],
+            "sources_queried": [
+                label
+                for enabled, label in [
+                    (bool(request_config.arxiv_queries), "arXiv"),
+                    (bool(request_config.pubmed_queries), "PubMed"),
+                    (request_config.enable_semantic_scholar and bool(request_config.semantic_scholar_queries), "Semantic Scholar"),
+                    (request_config.enable_google_scholar and bool(request_config.google_scholar_queries), "Google Scholar"),
+                ]
+                if enabled
+            ],
+            "scanned_count": stats.post_time_filter_candidates or stats.total_candidates,
+            "selected_count": len(papers),
+            "threshold_used": stats.ranking_threshold,
+            "notice": stats.search_notice,
+        },
+        "topic": {
+            "name": clean_text(str(primary_topic.get("name", ""))),
+            "keywords": [clean_text(str(item)) for item in primary_topic.get("keywords", []) if clean_text(str(item))],
+            "relevance_mode": normalize_relevance_mode(primary_topic.get("relevance_mode", LLM_RELEVANCE_MODE_DEFAULT)),
+            "arxiv_query": clean_text(str(primary_topic.get("arxiv_query", ""))),
+            "pubmed_query": clean_text(str(primary_topic.get("pubmed_query", ""))),
+            "semantic_scholar_query": clean_text(str(primary_topic.get("semantic_scholar_query", ""))),
+            "google_scholar_query": clean_text(str(primary_topic.get("google_scholar_query", ""))),
+        },
+        "papers": [
+            {
+                "rank": index,
+                "id": paper.paper_id,
+                "title": paper.title,
+                "authors": ", ".join(paper.authors),
+                "source": paper.source,
+                "url": paper.url,
+                "published_at": paper.published_at_utc.isoformat(),
+                "relevance_score": paper.score,
+                "relevance_reason": paper.llm_relevance_text,
+                "core_point": paper.llm_core_point_text,
+                "usefulness": paper.llm_usefulness_text,
+                "evidence_spans": list(paper.llm_evidence_spans or []),
+                "topic": paper.topic,
+                "project_name": paper.project_name,
+                "relevance_mode": paper.relevance_mode,
+            }
+            for index, paper in enumerate(papers, start=1)
+        ],
+        "diagnostics": build_diagnostics_lines(stats) if include_diagnostics else [],
+    }
 
 
 def run_digest(
@@ -3898,6 +4295,21 @@ def load_config(require_email_credentials: bool) -> AppConfig:
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash").strip() or "gemini-3.1-flash"
     if enable_gemini_advanced_reasoning:
         gemini_model = "gemini-3.1-pro"
+    enable_openai_compat_fallback = os.getenv("ENABLE_OPENAI_COMPAT_FALLBACK", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    openai_compat_api_key = resolve_secret_value(
+        "OPENAI_COMPAT_API_KEY",
+        os.getenv("OPENAI_COMPAT_API_KEY", ""),
+    )
+    openai_compat_model = os.getenv("OPENAI_COMPAT_MODEL", "").strip()
+    openai_compat_api_base = (
+        os.getenv("OPENAI_COMPAT_API_BASE", OPENAI_COMPAT_API_BASE_DEFAULT).strip()
+        or OPENAI_COMPAT_API_BASE_DEFAULT
+    )
     cerebras_api_key = resolve_secret_value("CEREBRAS_API_KEY", os.getenv("CEREBRAS_API_KEY", ""))
     cerebras_model = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b").strip() or "gpt-oss-120b"
     cerebras_api_base = (
@@ -4065,6 +4477,10 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         enable_llm_agent=enable_llm_agent,
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
+        openai_compat_api_key=openai_compat_api_key,
+        openai_compat_model=openai_compat_model,
+        openai_compat_api_base=openai_compat_api_base,
+        enable_openai_compat_fallback=enable_openai_compat_fallback,
         cerebras_api_key=cerebras_api_key,
         cerebras_model=cerebras_model,
         cerebras_api_base=cerebras_api_base,
@@ -4082,6 +4498,84 @@ def load_config(require_email_credentials: bool) -> AppConfig:
         output_language=output_language,
     )
 
+
+def load_agent_request_payload(path: str) -> Dict[str, Any]:
+    source = clean_text(path)
+    if not source:
+        return {}
+    if source == "-":
+        raw_text = sys.stdin.read()
+    else:
+        raw_text = Path(source).read_text(encoding="utf-8-sig")
+    if not clean_text(raw_text):
+        return {}
+    payload = json.loads(raw_text)
+    if not isinstance(payload, dict):
+        raise ValueError("Agent request file must contain a JSON object.")
+    return payload
+
+
+def normalize_agent_keywords(raw: Any) -> List[str]:
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, str):
+        items = raw.split(",")
+    else:
+        items = []
+    return dedupe_list([clean_text(str(item)) for item in items if clean_text(str(item))])
+
+
+def build_agent_cli_request(args: argparse.Namespace) -> Dict[str, Any]:
+    payload = load_agent_request_payload(args.agent_request_file) if args.agent_request_file else {}
+    if args.project_name:
+        payload["project_name"] = args.project_name
+    if args.research_context:
+        payload["research_context"] = args.research_context
+    if args.keywords:
+        payload["keywords"] = normalize_agent_keywords(args.keywords)
+    if args.search_intent:
+        payload["search_intent"] = args.search_intent
+    if args.time_horizon:
+        payload["time_horizon"] = args.time_horizon
+    if args.top_k is not None:
+        payload["top_k"] = args.top_k
+    if args.output_language:
+        payload["output_language"] = args.output_language
+    if args.model:
+        payload["model"] = args.model
+    if args.include_diagnostics:
+        payload["include_diagnostics"] = True
+    if "keywords" in payload:
+        payload["keywords"] = normalize_agent_keywords(payload.get("keywords", []))
+    return payload
+
+
+def run_agent_search_cli(config: AppConfig, args: argparse.Namespace) -> int:
+    payload = build_agent_cli_request(args)
+    research_context = clean_text(str(payload.get("research_context", "")))
+    if not research_context:
+        raise ValueError("research_context is required. Provide --research-context or --agent-request-file.")
+
+    result = search_papers_for_agent(
+        config,
+        project_name=clean_text(str(payload.get("project_name", ""))),
+        research_context=research_context,
+        keywords=normalize_agent_keywords(payload.get("keywords", [])),
+        search_intent=normalize_search_intent(payload.get("search_intent", "best_match")),
+        time_horizon_key=normalize_time_horizon_key(
+            payload.get("time_horizon", "1y"),
+            payload.get("search_intent", "best_match"),
+        ),
+        top_k=max(1, min(50, int(payload.get("top_k", 10) or 10))),
+        output_language=clean_text(str(payload.get("output_language", ""))) or None,
+        model=clean_text(str(payload.get("model", ""))) or None,
+        include_diagnostics=coerce_bool(payload.get("include_diagnostics"), False),
+        source_policy=payload.get("source_policy") if isinstance(payload.get("source_policy"), dict) else None,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2 if args.pretty_json else None))
+    return 0 if result.get("status") != "error" else 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Paper Morning research-context paper search runner."
@@ -4095,6 +4589,47 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Do not send email. Print the generated result to console.",
+    )
+    parser.add_argument(
+        "--agent-search",
+        action="store_true",
+        help="Run agent-oriented JSON search and print the response to stdout.",
+    )
+    parser.add_argument(
+        "--agent-request-file",
+        type=str,
+        default="",
+        help="Path to a JSON request object for --agent-search. Use '-' to read from stdin.",
+    )
+    parser.add_argument("--project-name", type=str, default="", help="Optional project label for --agent-search.")
+    parser.add_argument("--research-context", type=str, default="", help="Required context text for --agent-search.")
+    parser.add_argument("--keywords", type=str, default="", help="Comma-separated keywords for --agent-search.")
+    parser.add_argument(
+        "--search-intent",
+        type=str,
+        default="",
+        choices=["whats_new", "best_match", "discovery"],
+        help="Search intent for --agent-search.",
+    )
+    parser.add_argument(
+        "--time-horizon",
+        type=str,
+        default="",
+        choices=list(TIME_HORIZON_OPTIONS.keys()),
+        help="Time horizon for --agent-search.",
+    )
+    parser.add_argument("--top-k", type=int, default=None, help="Maximum papers to return for --agent-search.")
+    parser.add_argument("--output-language", type=str, default="", help="Output language for --agent-search.")
+    parser.add_argument("--model", type=str, default="", help="Optional model override for --agent-search.")
+    parser.add_argument(
+        "--include-diagnostics",
+        action="store_true",
+        help="Include diagnostics in --agent-search JSON output.",
+    )
+    parser.add_argument(
+        "--pretty-json",
+        action="store_true",
+        help="Pretty-print JSON output for --agent-search.",
     )
     return parser.parse_args()
 
@@ -4134,7 +4669,11 @@ def main() -> int:
     logging.info("Using env file: %s", env_path)
     logging.info("Using topics file: %s", topics_path)
 
-    require_email_credentials = not args.dry_run
+    if args.agent_search and args.run_once:
+        logging.error("--agent-search cannot be combined with --run-once.")
+        return 2
+
+    require_email_credentials = not args.dry_run and not args.agent_search
     try:
         config = load_config(require_email_credentials=require_email_credentials)
     except Exception as exc:
@@ -4142,6 +4681,8 @@ def main() -> int:
         return 1
 
     try:
+        if args.agent_search:
+            return run_agent_search_cli(config, args)
         if args.run_once:
             run_digest(config, dry_run=args.dry_run)
         else:

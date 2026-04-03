@@ -9,6 +9,9 @@ This document is the full operations guide for GitHub Actions mode.
 If you are new, start here first:
 - `MANUAL_FIRSTTIME_EN.md`
 
+If you want to use Paper Morning as a local tool for agents or scripts, read:
+- `MANUAL_AGENT_EN.md`
+
 ## 1) Core behavior
 - Delivery time follows your own timezone (`TIMEZONE`) and send time (`SEND_HOUR`, `SEND_MINUTE`)
 - Works independently from your local PC power state

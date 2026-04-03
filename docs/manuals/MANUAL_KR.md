@@ -2,6 +2,7 @@
 
 이 문서는 **고급 설정, 자동화, 이메일 발송, GitHub Actions 운영**을 다룹니다.  
 처음 설치하는 사용자는 먼저 [MANUAL_FIRSTTIME_KR.md](./MANUAL_FIRSTTIME_KR.md)를 보세요.
+에이전트/툴 연동 용도라면 [MANUAL_AGENT_KR.md](./MANUAL_AGENT_KR.md)를 보세요.
 
 ## 1. 현재 제품 방향
 Paper Morning의 기본 경로는 이제 `search-first`입니다.

@@ -38,6 +38,7 @@ Notes:
 ## Key Features
 - Personalized LLM relevance ranking using your active projects.
 - Search intents for recent updates, best-fit papers, and broader discovery.
+- Local agent interface with brokered credentials and JSON output.
 - Per-project mail cadence (`daily` / `every_3_days` / `weekly`) in Topic Editor.
 - Local inbox mode with browser popup scheduling on a running PC.
 - Configurable cadence: `daily`, `every_3_days`, `weekly`.
@@ -50,8 +51,10 @@ Notes:
 ## Quick Start
 - Beginner (English): [docs/manuals/MANUAL_FIRSTTIME_EN.md](docs/manuals/MANUAL_FIRSTTIME_EN.md)
 - Full operations (English): [docs/manuals/MANUAL_EN.md](docs/manuals/MANUAL_EN.md)
+- Agent/tool integration (English): [docs/manuals/MANUAL_AGENT_EN.md](docs/manuals/MANUAL_AGENT_EN.md)
 - Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
 - Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
+- Agent/tool integration (Korean): [docs/manuals/MANUAL_AGENT_KR.md](docs/manuals/MANUAL_AGENT_KR.md)
 
 ## Recommended First Path (Search-First, Local)
 Generate your first personalized search result before email or automation setup.
@@ -108,6 +111,18 @@ Main path for onboarding and preview-first setup:
 ```text
 http://127.0.0.1:5050
 ```
+
+## Agent Mode
+Paper Morning can also be used as a local paper-search tool for research agents.
+
+Security model:
+- your agent gets `AGENT_API_TOKEN`
+- Paper Morning keeps `GEMINI_API_KEY` or local backend credentials in `.env` / keyring
+- the agent never needs to see raw provider keys
+
+Interfaces:
+- Local HTTP JSON endpoint: `POST /api/agent/search`
+- CLI JSON mode: `python app/paper_digest_app.py --agent-search ...`
 
 ## Build Distribution Files
 ### Windows
