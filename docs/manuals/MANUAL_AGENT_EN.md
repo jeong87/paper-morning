@@ -7,6 +7,9 @@ Target audience:
 
 This manual explains how to use Paper Morning as a local paper-search tool for agents without exposing raw provider API keys.
 
+Related reading:
+- `SCORING_POLICY_EN.md`
+
 ## 1) Security model
 Do not give your agent:
 - `GEMINI_API_KEY`

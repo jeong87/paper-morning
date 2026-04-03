@@ -263,7 +263,6 @@ def write_env_file(path: Path, values: Dict[str, str]) -> None:
         f"CEREBRAS_API_BASE={values_to_write['CEREBRAS_API_BASE']}",
         f"GEMINI_MAX_PAPERS={values_to_write['GEMINI_MAX_PAPERS']}",
         f"LLM_RELEVANCE_THRESHOLD={values_to_write['LLM_RELEVANCE_THRESHOLD']}",
-        f"LLM_BATCH_SIZE={values_to_write['LLM_BATCH_SIZE']}",
         f"LLM_MAX_CANDIDATES={values_to_write['LLM_MAX_CANDIDATES']}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -428,7 +427,6 @@ def main() -> int:
         "CEREBRAS_API_BASE": cerebras_api_base,
         "GEMINI_MAX_PAPERS": "5",
         "LLM_RELEVANCE_THRESHOLD": "6",
-        "LLM_BATCH_SIZE": "5",
         "LLM_MAX_CANDIDATES": "30",
     }
 

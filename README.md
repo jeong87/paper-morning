@@ -199,9 +199,11 @@ Fallback:
 - Beginner (English): [docs/manuals/MANUAL_FIRSTTIME_EN.md](docs/manuals/MANUAL_FIRSTTIME_EN.md)
 - Full operations (English): [docs/manuals/MANUAL_EN.md](docs/manuals/MANUAL_EN.md)
 - Agent/tool integration (English): [docs/manuals/MANUAL_AGENT_EN.md](docs/manuals/MANUAL_AGENT_EN.md)
+- Scoring policy (English): [docs/manuals/SCORING_POLICY_EN.md](docs/manuals/SCORING_POLICY_EN.md)
 - Beginner (Korean): [docs/manuals/MANUAL_FIRSTTIME_KR.md](docs/manuals/MANUAL_FIRSTTIME_KR.md)
 - Full operations (Korean): [docs/manuals/MANUAL_KR.md](docs/manuals/MANUAL_KR.md)
 - Agent/tool integration (Korean): [docs/manuals/MANUAL_AGENT_KR.md](docs/manuals/MANUAL_AGENT_KR.md)
+- Scoring policy (Korean): [docs/manuals/SCORING_POLICY_KR.md](docs/manuals/SCORING_POLICY_KR.md)
 - Korean README: [docs/manuals/README_KR.md](docs/manuals/README_KR.md)
 
 ## Contact

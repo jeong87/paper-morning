@@ -171,7 +171,6 @@ EXPECTED_ENV_KEYS = [
     "CEREBRAS_API_BASE",
     "GEMINI_MAX_PAPERS",
     "LLM_RELEVANCE_THRESHOLD",
-    "LLM_BATCH_SIZE",
     "LLM_MAX_CANDIDATES",
 ]
 
@@ -235,7 +234,6 @@ DEFAULT_ENV_VALUES = {
     "CEREBRAS_API_BASE": CEREBRAS_API_BASE_DEFAULT,
     "GEMINI_MAX_PAPERS": "5",
     "LLM_RELEVANCE_THRESHOLD": "6",
-    "LLM_BATCH_SIZE": "5",
     "LLM_MAX_CANDIDATES": "30",
 }
 
@@ -4550,13 +4548,6 @@ def settings():
               <small>LLM_RELEVANCE_THRESHOLD — include papers at or above this score</small>
             </div>
             <input type="number" step="0.1" name="LLM_RELEVANCE_THRESHOLD" min="1" max="10" value="{esc('LLM_RELEVANCE_THRESHOLD')}" style="width:120px;" />
-          </div>
-          <div class="settings-row">
-            <div class="settings-label">
-              <strong>LLM Batch Size</strong>
-              <small>LLM_BATCH_SIZE</small>
-            </div>
-            <input type="number" name="LLM_BATCH_SIZE" min="1" value="{esc('LLM_BATCH_SIZE')}" style="width:120px;" />
           </div>
           <div class="settings-row">
             <div class="settings-label">

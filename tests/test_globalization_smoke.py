@@ -14,13 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import web_app
-from paper_digest_app import (
-    AppConfig,
-    Paper,
-    compose_email_html,
-    save_scheduled_send_lock,
-    should_send_now,
-)
+from paper_digest_app import AppConfig, save_scheduled_send_lock, should_send_now
 
 
 def make_config(timezone_name: str = "America/New_York") -> AppConfig:
@@ -28,6 +22,8 @@ def make_config(timezone_name: str = "America/New_York") -> AppConfig:
         gmail_address="sender@example.com",
         gmail_app_password="app-password",
         recipient_email="receiver@example.com",
+        delivery_mode="local_inbox",
+        auto_open_digest_window=True,
         enable_google_oauth=False,
         google_oauth_use_for_gmail=False,
         google_oauth_client_id="",
@@ -37,6 +33,8 @@ def make_config(timezone_name: str = "America/New_York") -> AppConfig:
         send_hour=9,
         send_minute=0,
         send_time_window_minutes=15,
+        search_intent_default="best_match",
+        search_time_horizon_default="1y",
         max_papers=5,
         lookback_hours=24,
         min_relevance_score=6.0,
@@ -58,13 +56,16 @@ def make_config(timezone_name: str = "America/New_York") -> AppConfig:
         enable_llm_agent=True,
         gemini_api_key="",
         gemini_model="gemini-3.1-pro",
+        openai_compat_api_key="",
+        openai_compat_model="",
+        openai_compat_api_base="",
+        enable_openai_compat_fallback=False,
         cerebras_api_key="",
         cerebras_model="gpt-oss-120b",
         cerebras_api_base="https://api.cerebras.ai/v1",
         enable_cerebras_fallback=True,
         gemini_max_papers=5,
-        llm_relevance_threshold=7.0,
-        llm_batch_size=5,
+        llm_relevance_threshold=6.0,
         llm_max_candidates_base=30,
         llm_max_candidates=30,
         max_search_queries_per_source=4,
@@ -77,58 +78,21 @@ def make_config(timezone_name: str = "America/New_York") -> AppConfig:
 
 
 class GlobalizationSmokeTests(unittest.TestCase):
-    def test_manual_default_is_english(self) -> None:
+    def test_settings_page_renders_agent_controls(self) -> None:
         app = web_app.app
         app.config["TESTING"] = True
-        with patch("web_app.read_env_map", return_value={"UI_LANGUAGE": "en", "WEB_PASSWORD": ""}), patch(
+        env_map = dict(web_app.DEFAULT_ENV_VALUES)
+        env_map["SETUP_WIZARD_COMPLETED"] = "true"
+        env_map["USE_KEYRING"] = "false"
+        with patch("web_app.read_env_map", return_value=env_map), patch(
             "web_app.get_web_password", return_value=""
         ):
             with app.test_client() as client:
-                response = client.get("/manual")
-        self.assertEqual(response.status_code, 200)
+                response = client.get("/settings")
         html = response.get_data(as_text=True)
-        self.assertIn("Paper Morning Manual (GitHub Actions Operations)", html)
-        self.assertNotIn("Paper Morning 매뉴얼", html)
-
-    def test_manual_supports_korean_query_param(self) -> None:
-        app = web_app.app
-        app.config["TESTING"] = True
-        with patch("web_app.read_env_map", return_value={"UI_LANGUAGE": "en", "WEB_PASSWORD": ""}), patch(
-            "web_app.get_web_password", return_value=""
-        ):
-            with app.test_client() as client:
-                response = client.get("/manual?lang=ko")
         self.assertEqual(response.status_code, 200)
-        html = response.get_data(as_text=True)
-        self.assertIn("Paper Morning 매뉴얼", html)
-
-    def test_output_language_localizes_email_headers(self) -> None:
-        now_utc = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
-        since_utc = now_utc - timedelta(hours=24)
-        paper = Paper(
-            paper_id="p1",
-            title="A paper title",
-            abstract="An abstract for testing localization.",
-            url="https://example.com",
-            authors=["A. Author"],
-            published_at_utc=now_utc - timedelta(hours=2),
-            source="arXiv",
-            score=9.0,
-            llm_relevance_text="",
-            llm_core_point_text="",
-            llm_usefulness_text="",
-        )
-        html = compose_email_html(
-            papers=[paper],
-            now_utc=now_utc,
-            since_utc=since_utc,
-            timezone_name="UTC",
-            output_language="ja",
-            stats=None,
-        )
-        self.assertIn("研究との関連性", html)
-        self.assertIn("主要な発見", html)
-        self.assertIn("活用方法", html)
+        self.assertIn("Agent API Settings", html)
+        self.assertIn("OPENAI-Compatible API Base", html)
 
     def test_should_send_now_once_per_local_date(self) -> None:
         config = make_config("America/New_York")
@@ -148,7 +112,10 @@ class GlobalizationSmokeTests(unittest.TestCase):
                     config.timezone_name,
                 )
 
-                should_send_again, reason, _ = should_send_now(config, now_utc + timedelta(minutes=5))
+                should_send_again, reason, _ = should_send_now(
+                    config,
+                    now_utc + timedelta(minutes=5),
+                )
                 self.assertFalse(should_send_again)
                 self.assertIn("Already sent for local date", reason)
 

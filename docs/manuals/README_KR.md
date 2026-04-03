@@ -197,9 +197,11 @@ fallback:
 - 초보자 가이드: [MANUAL_FIRSTTIME_KR.md](./MANUAL_FIRSTTIME_KR.md)
 - 전체 운영/자동화: [MANUAL_KR.md](./MANUAL_KR.md)
 - 에이전트/툴 연동: [MANUAL_AGENT_KR.md](./MANUAL_AGENT_KR.md)
+- scoring policy: [SCORING_POLICY_KR.md](./SCORING_POLICY_KR.md)
 - Beginner (English): [MANUAL_FIRSTTIME_EN.md](./MANUAL_FIRSTTIME_EN.md)
 - Full operations (English): [MANUAL_EN.md](./MANUAL_EN.md)
 - Agent/tool integration (English): [MANUAL_AGENT_EN.md](./MANUAL_AGENT_EN.md)
+- Scoring policy (English): [SCORING_POLICY_EN.md](./SCORING_POLICY_EN.md)
 - English README: [../../README.md](../../README.md)
 
 ## 문의
