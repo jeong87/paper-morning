@@ -7,7 +7,7 @@
 Paper Morning is a research-context paper search engine for medical and health AI work.
 It turns a project description into search queries, retrieves papers, reranks them by practical relevance, and explains why they matter.
 
-- Latest version: **[v0.7.1](VERSION)**
+- Latest version: **[v0.7.2](VERSION)**
 - License: `GNU AGPLv3` ([LICENSE](LICENSE))
 - Privacy policy: [PRIVACY.md](PRIVACY.md)
 

@@ -6,6 +6,31 @@ Note:
 - Repository history does not contain a public `0.6.0` version bump.
 - The preview-first and local-inbox transition work from that period was folded into `0.7.0`.
 
+## [0.7.2] - 2026-04-03
+
+### Added
+- Added dedicated scoring-policy documentation:
+  - `docs/manuals/SCORING_POLICY_EN.md`
+  - `docs/manuals/SCORING_POLICY_KR.md`
+- Added focused tests for the current search-first / agent-first shape:
+  - agent endpoint smoke coverage
+  - scoring-policy normalization/threshold coverage
+  - refreshed UI/scheduler smoke coverage
+
+### Changed
+- Split agent-oriented search logic out of the monolithic runtime into `app/agent_search.py`.
+- Split scoring-policy constants and helpers into `app/scoring_policy.py`.
+- Removed the legacy `LLM_BATCH_SIZE` setting from runtime config, UI, onboarding, and sample env because listwise reranking no longer uses it.
+- Removed old date-stamped zip build artifacts from the repository root.
+
+### Fixed
+- Reworked stale smoke tests so they match the current `AppConfig` and current local console behavior.
+- `python -m unittest discover tests` now passes again for the maintained test set.
+
+### Docs
+- Updated README / Korean README version markers to `v0.7.2`.
+- Added scoring-policy links into the main documentation path.
+
 ## [0.7.1] - 2026-04-03
 
 ### Added
