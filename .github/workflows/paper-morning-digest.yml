@@ -1,10 +1,6 @@
 name: paper-morning-digest
 
 on:
-  schedule:
-    # Run frequently; actual send timing is decided in app code via:
-    # TIMEZONE + SEND_HOUR + SEND_MINUTE + SEND_FREQUENCY.
-    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       os_runner:
